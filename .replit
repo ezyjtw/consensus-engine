@@ -36,4 +36,4 @@ externalPort = 80
 [deployment]
 deploymentTarget = "autoscale"
 run = ["./consensus-engine"]
-build = ["go", "build", "-o", "consensus-engine", "."]
+build = ["bash", "-c", "go build -o consensus-engine . && chmod +x consensus-engine && ls -la consensus-engine"]
