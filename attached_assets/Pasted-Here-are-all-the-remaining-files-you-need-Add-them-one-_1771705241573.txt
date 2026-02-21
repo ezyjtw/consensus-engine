@@ -1,0 +1,1156 @@
+Here are all the remaining files you need. Add them one at a time in Replit using the + New file button in the left sidebar.
+For each file I’ll tell you the exact filename (including the folder path) and the contents to paste.
+
+File 1
+Filename: internal/consensus/types.go
+
+package consensus
+
+type Venue string
+type Symbol string
+
+type VenueState string
+
+const (
+	StateOK          VenueState = "OK"
+	StateWarn        VenueState = "WARN"
+	StateBlacklisted VenueState = "BLACKLISTED"
+)
+
+type Orderbook struct {
+	Bids [][2]float64 `json:"bids"`
+	Asks [][2]float64 `json:"asks"`
+}
+
+type FeedHealth struct {
+	WsConnected bool  `json:"ws_connected"`
+	LastMsgTsMs int64 `json:"last_msg_ts_ms"`
+}
+
+type Quote struct {
+	TenantID     string     `json:"tenant_id"`
+	Venue        Venue      `json:"venue"`
+	Symbol       Symbol     `json:"symbol"`
+	TsMs         int64      `json:"ts_ms"`
+	BestBid      float64    `json:"best_bid"`
+	BestAsk      float64    `json:"best_ask"`
+	Mark         float64    `json:"mark,omitempty"`
+	Index        float64    `json:"index,omitempty"`
+	BidDepth1Pct float64    `json:"bid_depth_1pct,omitempty"`
+	AskDepth1Pct float64    `json:"ask_depth_1pct,omitempty"`
+	Orderbook    *Orderbook `json:"orderbook,omitempty"`
+	FeeBpsTaker  float64    `json:"fee_bps_taker"`
+	FeedHealth   FeedHealth `json:"feed_health"`
+}
+
+type VenueStatus struct {
+	State              VenueState
+	OutlierSinceMs     int64
+	HardOutlierSinceMs int64
+	WarnSinceMs        int64
+	BlacklistUntilMs   int64
+	RecoverySinceMs    int64
+	Reason             string
+}
+
+type VenueMetrics struct {
+	Venue         Venue      `json:"venue"`
+	Status        VenueState `json:"status"`
+	Trust         float64    `json:"trust"`
+	Mid           float64    `json:"mid"`
+	BuyExec       float64    `json:"buy_exec"`
+	SellExec      float64    `json:"sell_exec"`
+	EffectiveBuy  float64    `json:"effective_buy"`
+	EffectiveSell float64    `json:"effective_sell"`
+	DeviationBps  float64    `json:"deviation_bps"`
+	Flags         []string   `json:"flags,omitempty"`
+}
+
+type Consensus struct {
+	Mid      float64 `json:"mid"`
+	BuyExec  float64 `json:"buy_exec"`
+	SellExec float64 `json:"sell_exec"`
+	BandLow  float64 `json:"band_low"`
+	BandHigh float64 `json:"band_high"`
+	Quality  string  `json:"quality"`
+}
+
+type ConsensusUpdate struct {
+	TenantID        string         `json:"tenant_id"`
+	Symbol          Symbol         `json:"symbol"`
+	TsMs            int64          `json:"ts_ms"`
+	SizeNotionalUSD float64        `json:"size_notional_usd"`
+	Consensus       Consensus      `json:"consensus"`
+	Venues          []VenueMetrics `json:"venues"`
+}
+
+type VenueAnomaly struct {
+	TenantID          string  `json:"tenant_id"`
+	Symbol            Symbol  `json:"symbol"`
+	Venue             Venue   `json:"venue"`
+	TsMs              int64   `json:"ts_ms"`
+	AnomalyType       string  `json:"anomaly_type"`
+	Severity          string  `json:"severity"`
+	DeviationBps      float64 `json:"deviation_bps"`
+	ConsensusMid      float64 `json:"consensus_mid"`
+	VenueMid          float64 `json:"venue_mid"`
+	WindowMs          int64   `json:"window_ms"`
+	RecommendedAction string  `json:"recommended_action"`
+}
+
+type VenueStatusUpdate struct {
+	TenantID string     `json:"tenant_id"`
+	Venue    Venue      `json:"venue"`
+	Symbol   Symbol     `json:"symbol"`
+	TsMs     int64      `json:"ts_ms"`
+	Status   VenueState `json:"status"`
+	TtlMs    int64      `json:"ttl_ms,omitempty"`
+	Reason   string     `json:"reason"`
+}
+
+
+File 2
+Filename: internal/consensus/config.go
+
+package consensus
+
+import (
+	"fmt"
+	"os"
+
+	"gopkg.in/yaml.v3"
+)
+
+type Policy struct {
+	SizeNotionalUSD float64 `yaml:"size_notional_usd"`
+	StaleMs         int64   `yaml:"stale_ms"`
+
+	OutlierBpsWarn      float64 `yaml:"outlier_bps_warn"`
+	OutlierBpsBlacklist float64 `yaml:"outlier_bps_blacklist"`
+
+	WarnPersistMs      int64 `yaml:"warn_persist_ms"`
+	BlacklistPersistMs int64 `yaml:"blacklist_persist_ms"`
+	BlacklistTtlMs     int64 `yaml:"blacklist_ttl_ms"`
+	RecoveryMs         int64 `yaml:"recovery_ms"`
+
+	SpreadWarnBps float64 `yaml:"spread_warn_bps"`
+	MinCoreQuorum int     `yaml:"min_core_quorum"`
+
+	CoreVenues     []string           `yaml:"core_venues"`
+	OptionalVenues []string           `yaml:"optional_venues"`
+	Symbols        []string           `yaml:"symbols"`
+	BaseTrust      map[string]float64 `yaml:"base_trust"`
+
+	SlippageBufferBps float64 `yaml:"slippage_buffer_bps"`
+	DepthPenaltyBps   float64 `yaml:"depth_penalty_bps"`
+
+	Redis RedisConfig `yaml:"redis"`
+}
+
+type RedisConfig struct {
+	Addr            string `yaml:"addr"`
+	Password        string `yaml:"password"`
+	InputStream     string `yaml:"input_stream"`
+	OutputConsensus string `yaml:"output_consensus"`
+	OutputAnomalies string `yaml:"output_anomalies"`
+	OutputStatus    string `yaml:"output_status"`
+	ConsumerGroup   string `yaml:"consumer_group"`
+	ConsumerName    string `yaml:"consumer_name"`
+	BlockMs         int64  `yaml:"block_ms"`
+	BatchSize       int64  `yaml:"batch_size"`
+}
+
+func LoadPolicy(path string) (*Policy, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading policy file %s: %w", path, err)
+	}
+	var p Policy
+	if err := yaml.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("parsing policy YAML: %w", err)
+	}
+	p.ApplyEnvOverrides()
+	if err := p.validate(); err != nil {
+		return nil, fmt.Errorf("invalid policy: %w", err)
+	}
+	return &p, nil
+}
+
+func (p *Policy) ApplyEnvOverrides() {
+	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
+		p.Redis.Addr = addr
+	}
+	if pass := os.Getenv("REDIS_PASSWORD"); pass != "" {
+		p.Redis.Password = pass
+	}
+}
+
+func (p *Policy) validate() error {
+	if p.MinCoreQuorum < 1 {
+		return fmt.Errorf("min_core_quorum must be >= 1")
+	}
+	if p.SizeNotionalUSD <= 0 {
+		return fmt.Errorf("size_notional_usd must be > 0")
+	}
+	if len(p.CoreVenues) == 0 {
+		return fmt.Errorf("core_venues must not be empty")
+	}
+	return nil
+}
+
+func (p *Policy) CoreVenueSet() map[Venue]bool {
+	m := make(map[Venue]bool, len(p.CoreVenues))
+	for _, v := range p.CoreVenues {
+		m[Venue(v)] = true
+	}
+	return m
+}
+
+
+File 3
+Filename: internal/consensus/math.go
+
+package consensus
+
+import (
+	"math"
+	"sort"
+)
+
+const epsilon = 1e-10
+
+func Median(vals []float64) float64 {
+	n := len(vals)
+	if n == 0 {
+		return 0
+	}
+	sorted := make([]float64, n)
+	copy(sorted, vals)
+	sort.Float64s(sorted)
+	if n%2 == 0 {
+		return (sorted[n/2-1] + sorted[n/2]) / 2.0
+	}
+	return sorted[n/2]
+}
+
+func Percentile(vals []float64, p float64) float64 {
+	n := len(vals)
+	if n == 0 {
+		return 0
+	}
+	sorted := make([]float64, n)
+	copy(sorted, vals)
+	sort.Float64s(sorted)
+	if p <= 0 {
+		return sorted[0]
+	}
+	if p >= 100 {
+		return sorted[n-1]
+	}
+	rank := (p / 100.0) * float64(n-1)
+	lo := int(math.Floor(rank))
+	hi := lo + 1
+	if hi >= n {
+		return sorted[n-1]
+	}
+	frac := rank - float64(lo)
+	return sorted[lo]*(1-frac) + sorted[hi]*frac
+}
+
+func DeviationBps(px, ref float64) float64 {
+	if math.Abs(ref) < epsilon {
+		return 0
+	}
+	return math.Abs(px-ref) / ref * 10000.0
+}
+
+func MAD(vals []float64) float64 {
+	med := Median(vals)
+	devs := make([]float64, len(vals))
+	for i, v := range vals {
+		devs[i] = math.Abs(v - med)
+	}
+	return Median(devs)
+}
+
+func RobustZScore(val, med, mad float64) float64 {
+	return 0.6745 * math.Abs(val-med) / (mad + epsilon)
+}
+
+func SpreadBps(bid, ask float64) float64 {
+	mid := (bid + ask) / 2.0
+	if mid < epsilon {
+		return 0
+	}
+	return (ask - bid) / mid * 10000.0
+}
+
+
+File 4
+Filename: internal/consensus/price.go
+
+package consensus
+
+import "math"
+
+func ComputeMid(q Quote) float64 {
+	return (q.BestBid + q.BestAsk) / 2.0
+}
+
+func ComputeExecutableBuy(q Quote, notionalUSD float64, slippageBps, depthPenaltyBps float64) (float64, bool) {
+	if q.Orderbook != nil && len(q.Orderbook.Asks) > 0 {
+		return vwapBuy(q.Orderbook.Asks, notionalUSD, depthPenaltyBps)
+	}
+	buf := math.Max(SpreadBps(q.BestBid, q.BestAsk)*0.5, slippageBps)
+	return q.BestAsk * (1 + buf/10000.0), true
+}
+
+func ComputeExecutableSell(q Quote, notionalUSD float64, slippageBps, depthPenaltyBps float64) (float64, bool) {
+	if q.Orderbook != nil && len(q.Orderbook.Bids) > 0 {
+		return vwapSell(q.Orderbook.Bids, notionalUSD, depthPenaltyBps)
+	}
+	buf := math.Max(SpreadBps(q.BestBid, q.BestAsk)*0.5, slippageBps)
+	return q.BestBid * (1 - buf/10000.0), true
+}
+
+func vwapBuy(asks [][2]float64, notionalUSD, depthPenaltyBps float64) (float64, bool) {
+	remaining := notionalUSD
+	totalCost := 0.0
+	totalSize := 0.0
+	for _, level := range asks {
+		price, size := level[0], level[1]
+		levelNotional := price * size
+		if levelNotional >= remaining {
+			partial := remaining / price
+			totalCost += partial * price
+			totalSize += partial
+			remaining = 0
+			break
+		}
+		totalCost += levelNotional
+		totalSize += size
+		remaining -= levelNotional
+	}
+	if remaining > 0 || totalSize < epsilon {
+		lastAsk := asks[len(asks)-1][0]
+		return lastAsk * (1 + depthPenaltyBps/10000.0), false
+	}
+	return totalCost / totalSize, true
+}
+
+func vwapSell(bids [][2]float64, notionalUSD, depthPenaltyBps float64) (float64, bool) {
+	remaining := notionalUSD
+	totalProceeds := 0.0
+	totalSize := 0.0
+	for _, level := range bids {
+		price, size := level[0], level[1]
+		levelNotional := price * size
+		if levelNotional >= remaining {
+			partial := remaining / price
+			totalProceeds += partial * price
+			totalSize += partial
+			remaining = 0
+			break
+		}
+		totalProceeds += levelNotional
+		totalSize += size
+		remaining -= levelNotional
+	}
+	if remaining > 0 || totalSize < epsilon {
+		lastBid := bids[len(bids)-1][0]
+		return lastBid * (1 - depthPenaltyBps/10000.0), false
+	}
+	return totalProceeds / totalSize, true
+}
+
+func ApplyFeesBuy(price, feeBps float64) float64 {
+	return price * (1 + feeBps/10000.0)
+}
+
+func ApplyFeesSell(price, feeBps float64) float64 {
+	return price * (1 - feeBps/10000.0)
+}
+
+
+File 5
+Filename: internal/consensus/trust.go
+
+package consensus
+
+type TrustPenalties struct {
+	IsOutlier     bool
+	IsHardOutlier bool
+	SpreadBps     float64
+	StalenessMs   int64
+	StaleTholdMs  int64
+	State         VenueState
+}
+
+func ComputeTrust(base float64, p TrustPenalties) float64 {
+	if p.State == StateBlacklisted {
+		return 0
+	}
+	t := base
+	if p.IsHardOutlier {
+		t *= 0.05
+	} else if p.IsOutlier {
+		t *= 0.10
+	}
+	if p.State == StateWarn {
+		t *= 0.60
+	}
+	if p.StaleTholdMs > 0 && p.StalenessMs > p.StaleTholdMs/2 {
+		fraction := float64(p.StalenessMs) / float64(p.StaleTholdMs)
+		if fraction > 1 {
+			fraction = 1
+		}
+		t *= 1.0 - 0.6*fraction
+	}
+	if p.SpreadBps > 10 {
+		t *= 0.80
+	}
+	if p.SpreadBps > 25 {
+		t *= 0.70
+	}
+	return t
+}
+
+func NormalizeTrust(weights map[Venue]float64) map[Venue]float64 {
+	sum := 0.0
+	for _, w := range weights {
+		if w > 0 {
+			sum += w
+		}
+	}
+	norm := make(map[Venue]float64, len(weights))
+	if sum < epsilon {
+		if n := len(weights); n > 0 {
+			eq := 1.0 / float64(n)
+			for v := range weights {
+				norm[v] = eq
+			}
+		}
+		return norm
+	}
+	for v, w := range weights {
+		norm[v] = w / sum
+	}
+	return norm
+}
+
+
+File 6
+Filename: internal/consensus/circuitbreaker.go
+
+package consensus
+
+func UpdateVenueStatus(
+	nowMs int64,
+	current VenueStatus,
+	deviationBps float64,
+	policy *Policy,
+) (VenueStatus, *VenueAnomaly, bool) {
+	next := current
+	var anomaly *VenueAnomaly
+	transitioned := false
+
+	isOutlier := deviationBps > policy.OutlierBpsWarn
+	isHardOutlier := deviationBps > policy.OutlierBpsBlacklist
+
+	switch current.State {
+	case StateBlacklisted:
+		if nowMs >= current.BlacklistUntilMs {
+			next.State = StateWarn
+			next.WarnSinceMs = nowMs
+			next.RecoverySinceMs = nowMs
+			next.OutlierSinceMs = 0
+			next.HardOutlierSinceMs = 0
+			next.Reason = "Blacklist TTL expired; in recovery"
+			transitioned = true
+		}
+		return next, anomaly, transitioned
+
+	case StateOK:
+		if isHardOutlier {
+			if next.HardOutlierSinceMs == 0 {
+				next.HardOutlierSinceMs = nowMs
+			}
+			if nowMs-next.HardOutlierSinceMs >= policy.BlacklistPersistMs {
+				next, anomaly = blacklist(nowMs, next, deviationBps, policy,
+					"PRICE_OUTLIER > blacklist threshold")
+				transitioned = true
+			}
+		} else if isOutlier {
+			next.HardOutlierSinceMs = 0
+			if next.OutlierSinceMs == 0 {
+				next.OutlierSinceMs = nowMs
+			}
+			if nowMs-next.OutlierSinceMs >= policy.WarnPersistMs {
+				next.State = StateWarn
+				next.WarnSinceMs = nowMs
+				next.RecoverySinceMs = 0
+				next.Reason = "PRICE_OUTLIER > warn threshold"
+				transitioned = true
+				anomaly = &VenueAnomaly{
+					AnomalyType:       "PRICE_OUTLIER",
+					Severity:          "MEDIUM",
+					DeviationBps:      deviationBps,
+					WindowMs:          policy.WarnPersistMs,
+					RecommendedAction: "REDUCE_TRUST",
+				}
+			}
+		} else {
+			next.OutlierSinceMs = 0
+			next.HardOutlierSinceMs = 0
+		}
+
+	case StateWarn:
+		if isHardOutlier {
+			if next.HardOutlierSinceMs == 0 {
+				next.HardOutlierSinceMs = nowMs
+			}
+			if nowMs-next.HardOutlierSinceMs >= policy.BlacklistPersistMs {
+				next, anomaly = blacklist(nowMs, next, deviationBps, policy,
+					"PRICE_OUTLIER > blacklist threshold from WARN")
+				transitioned = true
+			}
+		} else if !isOutlier {
+			if next.RecoverySinceMs == 0 {
+				next.RecoverySinceMs = nowMs
+			}
+			if nowMs-next.RecoverySinceMs >= policy.RecoveryMs {
+				next.State = StateOK
+				next.WarnSinceMs = 0
+				next.RecoverySinceMs = 0
+				next.OutlierSinceMs = 0
+				next.HardOutlierSinceMs = 0
+				next.Reason = "Recovered to OK"
+				transitioned = true
+			}
+		} else {
+			next.RecoverySinceMs = 0
+			next.HardOutlierSinceMs = 0
+		}
+	}
+	return next, anomaly, transitioned
+}
+
+func blacklist(nowMs int64, s VenueStatus, deviationBps float64,
+	policy *Policy, reason string) (VenueStatus, *VenueAnomaly) {
+	s.State = StateBlacklisted
+	s.BlacklistUntilMs = nowMs + policy.BlacklistTtlMs
+	s.WarnSinceMs = 0
+	s.RecoverySinceMs = 0
+	s.OutlierSinceMs = 0
+	s.HardOutlierSinceMs = 0
+	s.Reason = reason
+	a := &VenueAnomaly{
+		AnomalyType:       "PRICE_OUTLIER",
+		Severity:          "HIGH",
+		DeviationBps:      deviationBps,
+		WindowMs:          policy.BlacklistPersistMs,
+		RecommendedAction: "BLACKLIST_60S",
+	}
+	return s, a
+}
+
+
+File 7
+Filename: internal/consensus/engine.go
+
+package consensus
+
+import "time"
+
+type Engine struct {
+	policy *Policy
+}
+
+func NewEngine(policy *Policy) *Engine {
+	return &Engine{policy: policy}
+}
+
+type ComputeResult struct {
+	Update        ConsensusUpdate
+	Anomalies     []VenueAnomaly
+	StatusUpdates []VenueStatusUpdate
+	NewStatuses   map[Venue]VenueStatus
+}
+
+func (e *Engine) Compute(
+	tenantID string,
+	symbol Symbol,
+	quotes map[Venue]Quote,
+	getStatus func(v Venue) VenueStatus,
+) ComputeResult {
+	nowMs := time.Now().UnixMilli()
+	p := e.policy
+
+	type venueRaw struct {
+		venue           Venue
+		quote           Quote
+		mid             float64
+		buyExec         float64
+		sellExec        float64
+		effectiveBuy    float64
+		effectiveSell   float64
+		spreadBps       float64
+		sufficientDepth bool
+	}
+
+	var eligible []venueRaw
+	for v, q := range quotes {
+		mid := ComputeMid(q)
+		buy, buyOK := ComputeExecutableBuy(q, p.SizeNotionalUSD,
+			p.SlippageBufferBps, p.DepthPenaltyBps)
+		sell, sellOK := ComputeExecutableSell(q, p.SizeNotionalUSD,
+			p.SlippageBufferBps, p.DepthPenaltyBps)
+		eligible = append(eligible, venueRaw{
+			venue:           v,
+			quote:           q,
+			mid:             mid,
+			buyExec:         buy,
+			sellExec:        sell,
+			effectiveBuy:    ApplyFeesBuy(buy, q.FeeBpsTaker),
+			effectiveSell:   ApplyFeesSell(sell, q.FeeBpsTaker),
+			spreadBps:       SpreadBps(q.BestBid, q.BestAsk),
+			sufficientDepth: buyOK && sellOK,
+		})
+	}
+
+	mids := make([]float64, len(eligible))
+	for i, r := range eligible {
+		mids[i] = r.mid
+	}
+	medianMid := Median(mids)
+	mad := MAD(mids)
+
+	rawTrust := make(map[Venue]float64, len(eligible))
+	newStatuses := make(map[Venue]VenueStatus, len(eligible))
+	var anomalies []VenueAnomaly
+	var statusUpdates []VenueStatusUpdate
+	var venueMetrics []VenueMetrics
+
+	for _, r := range eligible {
+		devBps := DeviationBps(r.mid, medianMid)
+		zScore := RobustZScore(r.mid, medianMid, mad)
+		isOutlier := zScore > 6 || devBps > p.OutlierBpsWarn
+		isHardOutlier := devBps > p.OutlierBpsBlacklist
+
+		curStatus := getStatus(r.venue)
+		nextStatus, anomaly, transitioned := UpdateVenueStatus(
+			nowMs, curStatus, devBps, p)
+		newStatuses[r.venue] = nextStatus
+
+		if transitioned {
+			su := VenueStatusUpdate{
+				TenantID: tenantID,
+				Venue:    r.venue,
+				Symbol:   symbol,
+				TsMs:     nowMs,
+				Status:   nextStatus.State,
+				Reason:   nextStatus.Reason,
+			}
+			if nextStatus.State == StateBlacklisted {
+				su.TtlMs = p.BlacklistTtlMs
+			}
+			statusUpdates = append(statusUpdates, su)
+		}
+
+		if anomaly != nil {
+			anomalies = append(anomalies, VenueAnomaly{
+				TenantID:          tenantID,
+				Symbol:            symbol,
+				Venue:             r.venue,
+				TsMs:              nowMs,
+				AnomalyType:       anomaly.AnomalyType,
+				Severity:          anomaly.Severity,
+				DeviationBps:      devBps,
+				ConsensusMid:      medianMid,
+				VenueMid:          r.mid,
+				WindowMs:          anomaly.WindowMs,
+				RecommendedAction: anomaly.RecommendedAction,
+			})
+		}
+
+		stalenessMs := nowMs - r.quote.FeedHealth.LastMsgTsMs
+		baseTrustVal := p.BaseTrust[string(r.venue)]
+		if baseTrustVal == 0 {
+			baseTrustVal = 0.05
+		}
+		t := ComputeTrust(baseTrustVal, TrustPenalties{
+			IsOutlier:     isOutlier,
+			IsHardOutlier: isHardOutlier,
+			SpreadBps:     r.spreadBps,
+			StalenessMs:   stalenessMs,
+			StaleTholdMs:  p.StaleMs,
+			State:         nextStatus.State,
+		})
+		rawTrust[r.venue] = t
+
+		flags := []string{}
+		if isOutlier {
+			flags = append(flags, "OUTLIER")
+		}
+		if isHardOutlier {
+			flags = append(flags, "HARD_OUTLIER")
+		}
+		if !r.sufficientDepth {
+			flags = append(flags, "INSUFFICIENT_DEPTH")
+		}
+
+		venueMetrics = append(venueMetrics, VenueMetrics{
+			Venue:         r.venue,
+			Status:        nextStatus.State,
+			Mid:           r.mid,
+			BuyExec:       r.buyExec,
+			SellExec:      r.sellExec,
+			EffectiveBuy:  r.effectiveBuy,
+			EffectiveSell: r.effectiveSell,
+			DeviationBps:  devBps,
+			Flags:         flags,
+		})
+	}
+
+	normTrust := NormalizeTrust(rawTrust)
+	for i, vm := range venueMetrics {
+		venueMetrics[i].Trust = normTrust[vm.Venue]
+	}
+
+	coreSet := p.CoreVenueSet()
+	coreEligible := 0
+	for _, vm := range venueMetrics {
+		if coreSet[vm.Venue] && vm.Status != StateBlacklisted {
+			coreEligible++
+		}
+	}
+
+	var consMid, consBuy, consSell float64
+	for _, r := range eligible {
+		tw := normTrust[r.venue]
+		consMid += tw * r.mid
+		consBuy += tw * r.effectiveBuy
+		consSell += tw * r.effectiveSell
+	}
+
+	var effBuys, effSells []float64
+	for _, r := range eligible {
+		if normTrust[r.venue] > 0 {
+			effBuys = append(effBuys, r.effectiveBuy)
+			effSells = append(effSells, r.effectiveSell)
+		}
+	}
+
+	bandHigh := Percentile(effBuys, 75)
+	bandLow := Percentile(effSells, 25)
+
+	midRef := consMid
+	if midRef < epsilon {
+		midRef = medianMid
+	}
+	var widenBps float64
+	switch {
+	case coreEligible < 2:
+		widenBps = 50
+	case coreEligible == 2:
+		widenBps = 25
+	case coreEligible == 3:
+		widenBps = 10
+	}
+	if widenBps > 0 {
+		widen := midRef * widenBps / 10000.0
+		bandHigh += widen
+		bandLow -= widen
+	}
+
+	quality := qualityScore(coreEligible, venueMetrics, p.MinCoreQuorum)
+
+	return ComputeResult{
+		Update: ConsensusUpdate{
+			TenantID:        tenantID,
+			Symbol:          symbol,
+			TsMs:            nowMs,
+			SizeNotionalUSD: p.SizeNotionalUSD,
+			Consensus: Consensus{
+				Mid:      consMid,
+				BuyExec:  consBuy,
+				SellExec: consSell,
+				BandLow:  bandLow,
+				BandHigh: bandHigh,
+				Quality:  quality,
+			},
+			Venues: venueMetrics,
+		},
+		Anomalies:     anomalies,
+		StatusUpdates: statusUpdates,
+		NewStatuses:   newStatuses,
+	}
+}
+
+func qualityScore(coreEligible int, metrics []VenueMetrics, minQuorum int) string {
+	warnCount := 0
+	for _, m := range metrics {
+		if m.Status == StateWarn {
+			warnCount++
+		}
+	}
+	switch {
+	case coreEligible >= 4 && warnCount == 0:
+		return "HIGH"
+	case coreEligible >= minQuorum:
+		return "MED"
+	default:
+		return "LOW"
+	}
+}
+
+
+File 8
+Filename: internal/store/store.go
+
+package store
+
+import (
+	"sync"
+	"time"
+
+	"github.com/yourorg/consensus-engine/internal/consensus"
+)
+
+type Key struct {
+	TenantID string
+	Symbol   consensus.Symbol
+	Venue    consensus.Venue
+}
+
+type Store struct {
+	mu      sync.RWMutex
+	quotes  map[Key]consensus.Quote
+	status  map[Key]consensus.VenueStatus
+	staleMs int64
+}
+
+func New(staleMs int64) *Store {
+	return &Store{
+		quotes:  make(map[Key]consensus.Quote),
+		status:  make(map[Key]consensus.VenueStatus),
+		staleMs: staleMs,
+	}
+}
+
+func (s *Store) UpsertQuote(q consensus.Quote) {
+	k := Key{TenantID: q.TenantID, Symbol: q.Symbol, Venue: q.Venue}
+	s.mu.Lock()
+	s.quotes[k] = q
+	s.mu.Unlock()
+}
+
+func (s *Store) LiveQuotes(tenantID string, symbol consensus.Symbol) map[consensus.Venue]consensus.Quote {
+	nowMs := time.Now().UnixMilli()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[consensus.Venue]consensus.Quote)
+	for k, q := range s.quotes {
+		if k.TenantID != tenantID || k.Symbol != symbol {
+			continue
+		}
+		if nowMs-q.FeedHealth.LastMsgTsMs > s.staleMs {
+			continue
+		}
+		out[k.Venue] = q
+	}
+	return out
+}
+
+func (s *Store) GetStatus(tenantID string, symbol consensus.Symbol,
+	venue consensus.Venue) consensus.VenueStatus {
+	k := Key{TenantID: tenantID, Symbol: symbol, Venue: venue}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	st, ok := s.status[k]
+	if !ok {
+		return consensus.VenueStatus{State: consensus.StateOK}
+	}
+	return st
+}
+
+func (s *Store) SetStatus(tenantID string, symbol consensus.Symbol,
+	venue consensus.Venue, vs consensus.VenueStatus) {
+	k := Key{TenantID: tenantID, Symbol: symbol, Venue: venue}
+	s.mu.Lock()
+	s.status[k] = vs
+	s.mu.Unlock()
+}
+
+
+File 9
+Filename: internal/eventbus/redis.go
+
+package eventbus
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/go-redis/redis/v9"
+	"github.com/yourorg/consensus-engine/internal/consensus"
+)
+
+type RedisConfig struct {
+	Addr            string
+	Password        string
+	InputStream     string
+	OutputConsensus string
+	OutputAnomalies string
+	OutputStatus    string
+	ConsumerGroup   string
+	ConsumerName    string
+	BlockMs         time.Duration
+	BatchSize       int64
+}
+
+type Bus struct {
+	rdb *redis.Client
+	cfg RedisConfig
+}
+
+func New(cfg RedisConfig) (*Bus, error) {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Addr,
+		Password: cfg.Password,
+	})
+	ctx := context.Background()
+	err := rdb.XGroupCreateMkStream(ctx, cfg.InputStream,
+		cfg.ConsumerGroup, "$").Err()
+	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+		return nil, fmt.Errorf("creating consumer group: %w", err)
+	}
+	return &Bus{rdb: rdb, cfg: cfg}, nil
+}
+
+func (b *Bus) ReadMarketUpdates(ctx context.Context) ([]consensus.Quote, error) {
+	streams, err := b.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group:    b.cfg.ConsumerGroup,
+		Consumer: b.cfg.ConsumerName,
+		Streams:  []string{b.cfg.InputStream, ">"},
+		Count:    b.cfg.BatchSize,
+		Block:    b.cfg.BlockMs,
+	}).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("XReadGroup: %w", err)
+	}
+	var quotes []consensus.Quote
+	for _, stream := range streams {
+		for _, msg := range stream.Messages {
+			raw, ok := msg.Values["data"].(string)
+			if !ok {
+				continue
+			}
+			var q consensus.Quote
+			if err := json.Unmarshal([]byte(raw), &q); err != nil {
+				continue
+			}
+			quotes = append(quotes, q)
+			_ = b.rdb.XAck(ctx, b.cfg.InputStream,
+				b.cfg.ConsumerGroup, msg.ID)
+		}
+	}
+	return quotes, nil
+}
+
+func (b *Bus) PublishConsensus(ctx context.Context,
+	u consensus.ConsensusUpdate) error {
+	data, err := json.Marshal(u)
+	if err != nil {
+		return err
+	}
+	return b.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: b.cfg.OutputConsensus,
+		Values: map[string]interface{}{"data": string(data)},
+	}).Err()
+}
+
+func (b *Bus) PublishAnomaly(ctx context.Context,
+	a consensus.VenueAnomaly) error {
+	data, err := json.Marshal(a)
+	if err != nil {
+		return err
+	}
+	return b.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: b.cfg.OutputAnomalies,
+		Values: map[string]interface{}{"data": string(data)},
+	}).Err()
+}
+
+func (b *Bus) PublishStatusUpdate(ctx context.Context,
+	s consensus.VenueStatusUpdate) error {
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return b.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: b.cfg.OutputStatus,
+		Values: map[string]interface{}{"data": string(data)},
+	}).Err()
+}
+
+func (b *Bus) Close() error {
+	return b.rdb.Close()
+}
+
+
+File 10
+Filename: cmd/consensus-engine/main.go
+
+package main
+
+import (
+	"context"
+	"flag"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/yourorg/consensus-engine/internal/consensus"
+	"github.com/yourorg/consensus-engine/internal/eventbus"
+	"github.com/yourorg/consensus-engine/internal/store"
+)
+
+func main() {
+	cfgPath := flag.String("config",
+		"configs/policies/consensus_policy.yaml", "Path to policy YAML")
+	flag.Parse()
+
+	policy, err := consensus.LoadPolicy(*cfgPath)
+	if err != nil {
+		log.Fatalf("failed to load policy: %v", err)
+	}
+
+	quoteStore := store.New(policy.StaleMs)
+	engine := consensus.NewEngine(policy)
+
+	bus, err := eventbus.New(eventbus.RedisConfig{
+		Addr:            policy.Redis.Addr,
+		Password:        policy.Redis.Password,
+		InputStream:     policy.Redis.InputStream,
+		OutputConsensus: policy.Redis.OutputConsensus,
+		OutputAnomalies: policy.Redis.OutputAnomalies,
+		OutputStatus:    policy.Redis.OutputStatus,
+		ConsumerGroup:   policy.Redis.ConsumerGroup,
+		ConsumerName:    policy.Redis.ConsumerName,
+		BlockMs:         time.Duration(policy.Redis.BlockMs) * time.Millisecond,
+		BatchSize:       policy.Redis.BatchSize,
+	})
+	if err != nil {
+		log.Fatalf("failed to create event bus: %v", err)
+	}
+	defer bus.Close()
+
+	ctx, cancel := signal.NotifyContext(context.Background(),
+		os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	log.Println("consensus-engine started...")
+
+	type symKey struct {
+		tenantID string
+		symbol   consensus.Symbol
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("shutting down")
+			return
+		default:
+		}
+
+		quotes, err := bus.ReadMarketUpdates(ctx)
+		if err != nil {
+			log.Printf("read error: %v", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		if len(quotes) == 0 {
+			continue
+		}
+
+		toRecompute := make(map[symKey]bool)
+		for _, q := range quotes {
+			quoteStore.UpsertQuote(q)
+			toRecompute[symKey{tenantID: q.TenantID,
+				symbol: q.Symbol}] = true
+		}
+
+		for sk := range toRecompute {
+			liveQuotes := quoteStore.LiveQuotes(sk.tenantID, sk.symbol)
+			if len(liveQuotes) == 0 {
+				continue
+			}
+			result := engine.Compute(sk.tenantID, sk.symbol, liveQuotes,
+				func(v consensus.Venue) consensus.VenueStatus {
+					return quoteStore.GetStatus(sk.tenantID, sk.symbol, v)
+				})
+
+			for v, ns := range result.NewStatuses {
+				quoteStore.SetStatus(sk.tenantID, sk.symbol, v, ns)
+			}
+			if err := bus.PublishConsensus(ctx, result.Update); err != nil {
+				log.Printf("publish consensus error: %v", err)
+			}
+			for _, a := range result.Anomalies {
+				if err := bus.PublishAnomaly(ctx, a); err != nil {
+					log.Printf("publish anomaly error: %v", err)
+				}
+			}
+			for _, su := range result.StatusUpdates {
+				if err := bus.PublishStatusUpdate(ctx, su); err != nil {
+					log.Printf("publish status error: %v", err)
+				}
+			}
+		}
+	}
+}
+
+
+File 11 — The Dockerfile
+Filename: Dockerfile
+
+FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY go.mod ./
+RUN go mod download
+COPY . .
+RUN go build -o consensus-engine ./cmd/consensus-engine
+
+FROM alpine:3.19
+WORKDIR /app
+COPY --from=builder /app/consensus-engine .
+COPY configs/ configs/
+ENTRYPOINT ["./consensus-engine", "-config", \
+  "configs/policies/consensus_policy.yaml"]
+
+
+That’s all 11 files!
+Here’s a checklist to track your progress:
+	∙	go.mod ✅ already done
+	∙	configs/policies/consensus_policy.yaml ✅ already done
+	∙	internal/consensus/types.go
+	∙	internal/consensus/config.go
+	∙	internal/consensus/math.go
+	∙	internal/consensus/price.go
+	∙	internal/consensus/trust.go
+	∙	internal/consensus/circuitbreaker.go
+	∙	internal/consensus/engine.go
+	∙	internal/store/store.go
+	∙	internal/eventbus/redis.go
+	∙	cmd/consensus-engine/main.go
+	∙	Dockerfile
+Take your time — do one file at a time and let me know when you’re done or if anything looks wrong. Once all files are in we’ll connect Redis and deploy!
