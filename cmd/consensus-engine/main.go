@@ -1,111 +1,124 @@
 package main
 
 import (
-	"context"
-	"flag"
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+        "context"
+        "flag"
+        "log"
+        "os"
+        "os/signal"
+        "syscall"
+        "time"
 
-	"github.com/yourorg/consensus-engine/internal/consensus"
-	"github.com/yourorg/consensus-engine/internal/eventbus"
-	"github.com/yourorg/consensus-engine/internal/store"
+        "github.com/yourorg/consensus-engine/internal/consensus"
+        "github.com/yourorg/consensus-engine/internal/eventbus"
+        "github.com/yourorg/consensus-engine/internal/store"
 )
 
 func main() {
-	cfgPath := flag.String("config",
-		"configs/policies/consensus_policy.yaml", "Path to policy YAML")
-	flag.Parse()
+        cfgPath := flag.String("config",
+                "configs/policies/consensus_policy.yaml", "Path to policy YAML")
+        flag.Parse()
 
-	policy, err := consensus.LoadPolicy(*cfgPath)
-	if err != nil {
-		log.Fatalf("failed to load policy: %v", err)
-	}
+        if addr := os.Getenv("REDIS_ADDR"); addr != "" {
+                log.Printf("REDIS_ADDR detected: %s", addr)
+        } else {
+                log.Println("REDIS_ADDR not set, using default from policy file")
+        }
+        if os.Getenv("REDIS_PASSWORD") != "" {
+                log.Println("REDIS_PASSWORD detected")
+        } else {
+                log.Println("REDIS_PASSWORD not set, using default from policy file")
+        }
 
-	quoteStore := store.New(policy.StaleMs)
-	engine := consensus.NewEngine(policy)
+        policy, err := consensus.LoadPolicy(*cfgPath)
+        if err != nil {
+                log.Fatalf("failed to load policy: %v", err)
+        }
 
-	bus, err := eventbus.New(eventbus.RedisConfig{
-		Addr:            policy.Redis.Addr,
-		Password:        policy.Redis.Password,
-		InputStream:     policy.Redis.InputStream,
-		OutputConsensus: policy.Redis.OutputConsensus,
-		OutputAnomalies: policy.Redis.OutputAnomalies,
-		OutputStatus:    policy.Redis.OutputStatus,
-		ConsumerGroup:   policy.Redis.ConsumerGroup,
-		ConsumerName:    policy.Redis.ConsumerName,
-		BlockMs:         time.Duration(policy.Redis.BlockMs) * time.Millisecond,
-		BatchSize:       policy.Redis.BatchSize,
-	})
-	if err != nil {
-		log.Fatalf("failed to create event bus: %v", err)
-	}
-	defer bus.Close()
+        log.Printf("Redis address: %s", policy.Redis.Addr)
 
-	ctx, cancel := signal.NotifyContext(context.Background(),
-		os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+        quoteStore := store.New(policy.StaleMs)
+        engine := consensus.NewEngine(policy)
 
-	log.Println("consensus-engine started...")
+        bus, err := eventbus.New(eventbus.RedisConfig{
+                Addr:            policy.Redis.Addr,
+                Password:        policy.Redis.Password,
+                InputStream:     policy.Redis.InputStream,
+                OutputConsensus: policy.Redis.OutputConsensus,
+                OutputAnomalies: policy.Redis.OutputAnomalies,
+                OutputStatus:    policy.Redis.OutputStatus,
+                ConsumerGroup:   policy.Redis.ConsumerGroup,
+                ConsumerName:    policy.Redis.ConsumerName,
+                BlockMs:         time.Duration(policy.Redis.BlockMs) * time.Millisecond,
+                BatchSize:       policy.Redis.BatchSize,
+        })
+        if err != nil {
+                log.Fatalf("failed to create event bus: %v", err)
+        }
+        defer bus.Close()
 
-	type symKey struct {
-		tenantID string
-		symbol   consensus.Symbol
-	}
+        ctx, cancel := signal.NotifyContext(context.Background(),
+                os.Interrupt, syscall.SIGTERM)
+        defer cancel()
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("shutting down")
-			return
-		default:
-		}
+        log.Println("consensus-engine started...")
 
-		quotes, err := bus.ReadMarketUpdates(ctx)
-		if err != nil {
-			log.Printf("read error: %v", err)
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-		if len(quotes) == 0 {
-			continue
-		}
+        type symKey struct {
+                tenantID string
+                symbol   consensus.Symbol
+        }
 
-		toRecompute := make(map[symKey]bool)
-		for _, q := range quotes {
-			quoteStore.UpsertQuote(q)
-			toRecompute[symKey{tenantID: q.TenantID,
-				symbol: q.Symbol}] = true
-		}
+        for {
+                select {
+                case <-ctx.Done():
+                        log.Println("shutting down")
+                        return
+                default:
+                }
 
-		for sk := range toRecompute {
-			liveQuotes := quoteStore.LiveQuotes(sk.tenantID, sk.symbol)
-			if len(liveQuotes) == 0 {
-				continue
-			}
-			result := engine.Compute(sk.tenantID, sk.symbol, liveQuotes,
-				func(v consensus.Venue) consensus.VenueStatus {
-					return quoteStore.GetStatus(sk.tenantID, sk.symbol, v)
-				})
+                quotes, err := bus.ReadMarketUpdates(ctx)
+                if err != nil {
+                        log.Printf("read error: %v", err)
+                        time.Sleep(100 * time.Millisecond)
+                        continue
+                }
+                if len(quotes) == 0 {
+                        continue
+                }
 
-			for v, ns := range result.NewStatuses {
-				quoteStore.SetStatus(sk.tenantID, sk.symbol, v, ns)
-			}
-			if err := bus.PublishConsensus(ctx, result.Update); err != nil {
-				log.Printf("publish consensus error: %v", err)
-			}
-			for _, a := range result.Anomalies {
-				if err := bus.PublishAnomaly(ctx, a); err != nil {
-					log.Printf("publish anomaly error: %v", err)
-				}
-			}
-			for _, su := range result.StatusUpdates {
-				if err := bus.PublishStatusUpdate(ctx, su); err != nil {
-					log.Printf("publish status error: %v", err)
-				}
-			}
-		}
-	}
+                toRecompute := make(map[symKey]bool)
+                for _, q := range quotes {
+                        quoteStore.UpsertQuote(q)
+                        toRecompute[symKey{tenantID: q.TenantID,
+                                symbol: q.Symbol}] = true
+                }
+
+                for sk := range toRecompute {
+                        liveQuotes := quoteStore.LiveQuotes(sk.tenantID, sk.symbol)
+                        if len(liveQuotes) == 0 {
+                                continue
+                        }
+                        result := engine.Compute(sk.tenantID, sk.symbol, liveQuotes,
+                                func(v consensus.Venue) consensus.VenueStatus {
+                                        return quoteStore.GetStatus(sk.tenantID, sk.symbol, v)
+                                })
+
+                        for v, ns := range result.NewStatuses {
+                                quoteStore.SetStatus(sk.tenantID, sk.symbol, v, ns)
+                        }
+                        if err := bus.PublishConsensus(ctx, result.Update); err != nil {
+                                log.Printf("publish consensus error: %v", err)
+                        }
+                        for _, a := range result.Anomalies {
+                                if err := bus.PublishAnomaly(ctx, a); err != nil {
+                                        log.Printf("publish anomaly error: %v", err)
+                                }
+                        }
+                        for _, su := range result.StatusUpdates {
+                                if err := bus.PublishStatusUpdate(ctx, su); err != nil {
+                                        log.Printf("publish status error: %v", err)
+                                }
+                        }
+                }
+        }
 }
