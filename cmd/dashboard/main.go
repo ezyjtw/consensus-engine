@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/redis/go-redis/v9"
@@ -30,12 +32,9 @@ func main() {
 		port = "8080"
 	}
 
-	rdbOpts := &redis.Options{
-		Addr:     redisAddr(),
-		Password: os.Getenv("REDIS_PASSWORD"),
-	}
-	if os.Getenv("REDIS_TLS") == "true" {
-		rdbOpts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	rdbOpts, err := buildRedisOpts()
+	if err != nil {
+		log.Fatalf("redis config: %v", err)
 	}
 	rdb := redis.NewClient(rdbOpts)
 
@@ -72,11 +71,32 @@ func main() {
 	httpSrv.Shutdown(context.Background()) //nolint:errcheck
 }
 
-func redisAddr() string {
-	if v := os.Getenv("REDIS_ADDR"); v != "" {
-		return v
+func buildRedisOpts() (*redis.Options, error) {
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		addr = "localhost:6379"
 	}
-	return "localhost:6379"
+	if strings.HasPrefix(addr, "redis://") || strings.HasPrefix(addr, "rediss://") {
+		opts, err := redis.ParseURL(addr)
+		if err != nil {
+			return nil, fmt.Errorf("parsing REDIS_ADDR: %w", err)
+		}
+		if pw := os.Getenv("REDIS_PASSWORD"); pw != "" {
+			opts.Password = pw
+		}
+		if os.Getenv("REDIS_TLS") == "true" && opts.TLSConfig == nil {
+			opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		return opts, nil
+	}
+	opts := &redis.Options{
+		Addr:     addr,
+		Password: os.Getenv("REDIS_PASSWORD"),
+	}
+	if os.Getenv("REDIS_TLS") == "true" {
+		opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	return opts, nil
 }
 
 func mustEnv(key string) string {
