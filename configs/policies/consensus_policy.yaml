@@ -1,16 +1,16 @@
 size_notional_usd: 10000.0
-stale_ms: 5000
+stale_ms: 750
 
-outlier_bps_warn: 50.0
-outlier_bps_blacklist: 200.0
+outlier_bps_warn: 25.0
+outlier_bps_blacklist: 50.0
 
-warn_persist_ms: 3000
-blacklist_persist_ms: 5000
+warn_persist_ms: 500
+blacklist_persist_ms: 1500
 blacklist_ttl_ms: 60000
-recovery_ms: 10000
+recovery_ms: 2000
 
-spread_warn_bps: 15.0
-min_core_quorum: 2
+spread_warn_bps: 10.0
+min_core_quorum: 3
 
 core_venues:
   - binance
