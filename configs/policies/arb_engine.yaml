@@ -1,0 +1,74 @@
+symbols:
+  - BTC-PERP
+  - ETH-PERP
+
+# Minimum consensus quality required to emit any intent.
+# LOW is always rejected. MED requires higher edge threshold than HIGH.
+min_consensus_quality: MED
+
+# Net edge required per quality level (in basis points, after latency buffers).
+min_edge_bps_net:
+  HIGH: 6.0
+  MED: 10.0
+  LOW: 9999.0
+
+# How long an emitted intent is considered valid by the execution router.
+intent_ttl_ms:
+  HIGH: 400
+  MED: 250
+  LOW: 0
+
+# Extra buffer applied to both legs to account for latency and adverse selection.
+# buyCost  = effective_buy  * (1 + latency_buffer/10000)
+# sellValue = effective_sell * (1 - latency_buffer/10000)
+latency_buffer_bps:
+  HIGH: 2.0
+  MED: 4.0
+  LOW: 10.0
+
+# Sizes attempted per opportunity search, largest first for max P&L capture.
+size_ladder_usd:
+  - 10000
+  - 5000
+  - 2000
+
+# Per-leg max slippage guard embedded in price_limit of each leg.
+max_slippage_bps: 8.0
+
+# Minimum gap between intents for the same symbol+pair to prevent spam.
+cooldown_ms: 300
+
+# If false, WARN-status venues are excluded from arb legs (safer default).
+allow_warn_venues: false
+
+# Venues with the OUTLIER flag from the consensus engine are excluded.
+ignore_flagged_venues: true
+
+# Each pair [A, B] is checked in BOTH directions (buy-A/sell-B and buy-B/sell-A).
+# Only pairs listed here are evaluated for a given symbol.
+enabled_pairs:
+  BTC-PERP:
+    - [binance, okx]
+    - [binance, bybit]
+    - [binance, deribit]
+    - [okx, bybit]
+    - [okx, deribit]
+    - [bybit, deribit]
+  ETH-PERP:
+    - [binance, okx]
+    - [binance, bybit]
+    - [binance, deribit]
+    - [okx, bybit]
+    - [okx, deribit]
+    - [bybit, deribit]
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  use_tls: false
+  input_stream: "consensus:updates"
+  output_intents: "trade:intents"
+  consumer_group: "arb-engine"
+  consumer_name: "worker-1"
+  block_ms: 1000
+  batch_size: 100
