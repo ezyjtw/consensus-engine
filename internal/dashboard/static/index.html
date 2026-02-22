@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consensus Engine</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080c14;--surface:#0f1724;--surface2:#1a2235;--border:#1e2d45;
+  --text:#e2e8f0;--muted:#64748b;--accent:#3b82f6;--accent2:#1d4ed8;
+  --green:#10b981;--yellow:#f59e0b;--red:#ef4444;--orange:#f97316;
+  --mono:'Courier New',monospace;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px}
+
+/* ── login ─────────────────────────────────────────────────── */
+#login{
+  display:flex;align-items:center;justify-content:center;height:100vh;
+  background:radial-gradient(ellipse at center,#0d1a2e 0%,var(--bg) 70%);
+}
+.login-box{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:40px 48px;width:360px;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);
+}
+.login-box h1{font-size:18px;color:var(--accent);letter-spacing:.08em;margin-bottom:6px}
+.login-box p{color:var(--muted);font-size:11px;margin-bottom:24px}
+.login-box input{
+  width:100%;background:var(--bg);border:1px solid var(--border);
+  color:var(--text);padding:10px 12px;border-radius:4px;font-family:var(--mono);
+  font-size:13px;margin-bottom:12px;outline:none;
+}
+.login-box input:focus{border-color:var(--accent)}
+.btn-primary{
+  width:100%;background:var(--accent);color:#fff;border:none;
+  padding:10px;border-radius:4px;cursor:pointer;font-family:var(--mono);
+  font-size:13px;letter-spacing:.05em;transition:background .15s;
+}
+.btn-primary:hover{background:var(--accent2)}
+#login-err{color:var(--red);font-size:11px;margin-top:8px;min-height:14px}
+
+/* ── shell ──────────────────────────────────────────────────── */
+#app{display:none;flex-direction:column;height:100vh}
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--surface);border-bottom:1px solid var(--border);
+  padding:0 20px;height:44px;flex-shrink:0;
+}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.logo{font-size:14px;color:var(--accent);letter-spacing:.1em;font-weight:bold}
+.kill-badge{
+  display:flex;align-items:center;gap:6px;padding:4px 10px;
+  border-radius:3px;font-size:11px;letter-spacing:.06em;
+  background:var(--surface2);border:1px solid var(--border);
+}
+.kill-badge.active{background:rgba(239,68,68,.15);border-color:var(--red);color:var(--red)}
+.kill-badge.inactive{color:var(--green)}
+.kill-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.conn-indicator{font-size:11px;color:var(--muted)}
+.conn-indicator.ok{color:var(--green)}
+
+.tabs{
+  display:flex;background:var(--surface);border-bottom:1px solid var(--border);
+  flex-shrink:0;padding:0 16px;
+}
+.tab{
+  padding:10px 18px;cursor:pointer;font-size:12px;letter-spacing:.06em;
+  border-bottom:2px solid transparent;color:var(--muted);transition:color .15s;
+}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+.content{flex:1;overflow:auto;padding:20px}
+
+/* ── cards / sections ───────────────────────────────────────── */
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:6px;padding:20px;margin-bottom:16px;
+}
+.card-title{
+  font-size:11px;color:var(--muted);letter-spacing:.1em;
+  text-transform:uppercase;margin-bottom:14px;
+}
+.section-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.section-grid{grid-template-columns:1fr}}
+
+/* ── venue table ────────────────────────────────────────────── */
+table{width:100%;border-collapse:collapse}
+th{
+  color:var(--muted);font-size:10px;letter-spacing:.1em;
+  text-transform:uppercase;padding:6px 10px;text-align:left;
+  border-bottom:1px solid var(--border);white-space:nowrap;
+}
+td{padding:8px 10px;border-bottom:1px solid rgba(30,45,69,.5);white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── badges ─────────────────────────────────────────────────── */
+.badge{
+  display:inline-block;padding:2px 7px;border-radius:3px;
+  font-size:10px;letter-spacing:.08em;font-weight:bold;
+}
+.badge-ok{background:rgba(16,185,129,.15);color:var(--green)}
+.badge-warn{background:rgba(245,158,11,.15);color:var(--yellow)}
+.badge-bl{background:rgba(239,68,68,.15);color:var(--red)}
+.badge-high{background:rgba(16,185,129,.15);color:var(--green)}
+.badge-med{background:rgba(245,158,11,.15);color:var(--yellow)}
+.badge-low{background:rgba(239,68,68,.15);color:var(--red)}
+
+.flag{
+  display:inline-block;margin-right:4px;padding:1px 5px;
+  border-radius:2px;font-size:9px;background:rgba(239,68,68,.15);color:var(--red);
+}
+
+/* ── consensus summary ──────────────────────────────────────── */
+.sym-tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.sym-tab{
+  padding:4px 12px;border-radius:3px;cursor:pointer;font-size:11px;
+  border:1px solid var(--border);color:var(--muted);
+}
+.sym-tab.active{border-color:var(--accent);color:var(--accent)}
+
+.consensus-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+@media(max-width:700px){.consensus-grid{grid-template-columns:1fr 1fr}}
+.metric{background:var(--surface2);border-radius:4px;padding:12px}
+.metric-label{font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:4px}
+.metric-val{font-size:16px;color:var(--text)}
+.metric-val.price{color:#a5f3fc}
+
+/* ── anomaly log ─────────────────────────────────────────────── */
+.anom-list{list-style:none;max-height:220px;overflow-y:auto}
+.anom-item{
+  padding:7px 10px;border-bottom:1px solid rgba(30,45,69,.5);
+  font-size:11px;line-height:1.5;
+}
+.anom-item:last-child{border-bottom:none}
+.anom-item.high{border-left:3px solid var(--red)}
+.anom-item.medium{border-left:3px solid var(--yellow)}
+.anom-ts{color:var(--muted);font-size:10px}
+.empty-state{color:var(--muted);font-size:12px;padding:20px 0;text-align:center}
+
+/* ── connections ─────────────────────────────────────────────── */
+.exchange-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.exchange-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:16px}
+.exchange-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.exchange-name{font-size:13px;letter-spacing:.06em;text-transform:uppercase}
+.config-dot{width:8px;height:8px;border-radius:50%}
+.config-dot.yes{background:var(--green)}
+.config-dot.no{background:var(--muted)}
+label{display:block;font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:4px}
+input[type=text],input[type=password]{
+  width:100%;background:var(--bg);border:1px solid var(--border);
+  color:var(--text);padding:8px 10px;border-radius:4px;font-family:var(--mono);
+  font-size:12px;outline:none;margin-bottom:10px;
+}
+input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
+.btn{
+  padding:7px 14px;border-radius:4px;cursor:pointer;font-family:var(--mono);
+  font-size:12px;border:1px solid;transition:opacity .15s;letter-spacing:.05em;
+}
+.btn:hover{opacity:.8}
+.btn-save{background:transparent;border-color:var(--accent);color:var(--accent)}
+.btn-danger{background:var(--red);border-color:var(--red);color:#fff;font-size:13px;padding:9px 20px}
+.btn-ghost{background:transparent;border-color:var(--border);color:var(--muted)}
+.btn-sm{padding:4px 10px;font-size:11px}
+.save-msg{font-size:10px;color:var(--green);margin-left:8px;opacity:0;transition:opacity .3s}
+.save-msg.show{opacity:1}
+
+/* ── kill switch ─────────────────────────────────────────────── */
+.kill-section{max-width:520px;margin:0 auto}
+.kill-status{
+  text-align:center;padding:28px;border-radius:8px;margin-bottom:20px;
+  border:2px solid;
+}
+.kill-status.active{border-color:var(--red);background:rgba(239,68,68,.08)}
+.kill-status.inactive{border-color:var(--border);background:var(--surface2)}
+.kill-label{font-size:28px;font-weight:bold;letter-spacing:.1em;margin-bottom:6px}
+.kill-sub{font-size:12px;color:var(--muted)}
+.kill-reason-text{font-size:12px;color:var(--orange);margin-top:8px}
+.kill-reason-input{width:100%;margin-bottom:12px}
+.btn-killwrap{text-align:center}
+.btn-kill{
+  background:var(--red);border:2px solid #b91c1c;color:#fff;
+  font-family:var(--mono);font-size:15px;letter-spacing:.12em;
+  padding:14px 40px;border-radius:6px;cursor:pointer;transition:all .15s;
+}
+.btn-kill:hover{background:#b91c1c}
+.btn-kill.armed{animation:pulse-red 1s infinite}
+@keyframes pulse-red{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.5)}50%{box-shadow:0 0 0 8px rgba(239,68,68,0)}}
+.btn-clear{
+  background:transparent;border:1px solid var(--green);color:var(--green);
+  font-family:var(--mono);font-size:13px;letter-spacing:.08em;
+  padding:10px 28px;border-radius:4px;cursor:pointer;
+}
+.btn-clear:hover{background:rgba(16,185,129,.1)}
+.confirm-hint{font-size:11px;color:var(--muted);margin-top:8px}
+
+/* ── alerts ──────────────────────────────────────────────────── */
+.alerts-layout{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:700px){.alerts-layout{grid-template-columns:1fr}}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(30,45,69,.5)}
+.toggle-row:last-child{border-bottom:none}
+.toggle-label{font-size:12px}
+/* toggle */
+.toggle{position:relative;width:36px;height:20px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.slider{
+  position:absolute;inset:0;background:var(--border);border-radius:20px;
+  cursor:pointer;transition:background .2s;
+}
+.slider:before{
+  content:'';position:absolute;width:14px;height:14px;background:#fff;
+  border-radius:50%;bottom:3px;left:3px;transition:transform .2s;
+}
+.toggle input:checked+.slider{background:var(--accent)}
+.toggle input:checked+.slider:before{transform:translateX(16px)}
+
+.threshold-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(30,45,69,.5)}
+.threshold-row label{flex:1;font-size:12px;color:var(--text);margin-bottom:0}
+.threshold-input{
+  width:90px;background:var(--bg);border:1px solid var(--border);
+  color:var(--text);padding:5px 8px;border-radius:4px;font-family:var(--mono);
+  font-size:12px;outline:none;text-align:right;
+}
+.threshold-input:focus{border-color:var(--accent)}
+.unit{color:var(--muted);font-size:11px;white-space:nowrap}
+
+.webhook-row{display:flex;gap:8px;align-items:flex-end;margin-bottom:12px}
+.webhook-row input{flex:1;margin-bottom:0}
+.status-line{font-size:11px;min-height:16px;margin-top:4px}
+.status-line.ok{color:var(--green)}
+.status-line.err{color:var(--red)}
+
+/* ── scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ LOGIN ═══════════════ -->
+<div id="login">
+  <div class="login-box">
+    <h1>CONSENSUS ENGINE</h1>
+    <p>Enter your dashboard access token to continue.</p>
+    <input id="tok" type="password" placeholder="Access token" autocomplete="current-password">
+    <button class="btn-primary" onclick="doLogin()">CONNECT</button>
+    <div id="login-err"></div>
+  </div>
+</div>
+
+<!-- ═══════════════ APP ════════════════ -->
+<div id="app">
+
+  <!-- top bar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="logo">⬡ CONSENSUS</span>
+      <div id="kill-badge" class="kill-badge inactive">
+        <span class="kill-dot"></span>
+        <span id="kill-badge-text">ENGINE ACTIVE</span>
+      </div>
+    </div>
+    <div class="conn-indicator" id="sse-status">◌ connecting...</div>
+  </div>
+
+  <!-- tab bar -->
+  <div class="tabs">
+    <div class="tab active" data-tab="live" onclick="switchTab('live')">LIVE</div>
+    <div class="tab" data-tab="connections" onclick="switchTab('connections')">CONNECTIONS</div>
+    <div class="tab" data-tab="kill" onclick="switchTab('kill')">KILL SWITCH</div>
+    <div class="tab" data-tab="alerts" onclick="switchTab('alerts')">ALERTS</div>
+  </div>
+
+  <!-- ─── LIVE ────────────────────────────────────────────── -->
+  <div id="tab-live" class="content">
+    <!-- symbol selector + consensus summary -->
+    <div class="card">
+      <div class="card-title">Consensus Summary</div>
+      <div class="sym-tabs" id="sym-tabs"></div>
+      <div class="consensus-grid" id="consensus-summary">
+        <div class="metric"><div class="metric-label">MID</div><div class="metric-val price" id="cs-mid">—</div></div>
+        <div class="metric"><div class="metric-label">BUY EXEC</div><div class="metric-val price" id="cs-buy">—</div></div>
+        <div class="metric"><div class="metric-label">SELL EXEC</div><div class="metric-val price" id="cs-sell">—</div></div>
+        <div class="metric"><div class="metric-label">BAND</div><div class="metric-val" id="cs-band">—</div></div>
+        <div class="metric"><div class="metric-label">QUALITY</div><div class="metric-val" id="cs-quality">—</div></div>
+      </div>
+    </div>
+
+    <!-- venue table -->
+    <div class="card">
+      <div class="card-title">Venues</div>
+      <table id="venue-table">
+        <thead>
+          <tr>
+            <th>Venue</th><th>Status</th><th>Trust</th>
+            <th>Mid</th><th>Buy Exec</th><th>Sell Exec</th>
+            <th>Dev (bps)</th><th>Flags</th>
+          </tr>
+        </thead>
+        <tbody id="venue-tbody">
+          <tr><td colspan="8" class="empty-state">Waiting for quotes…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- recent anomalies -->
+    <div class="card">
+      <div class="card-title">Recent Anomalies</div>
+      <ul class="anom-list" id="anom-list">
+        <li class="anom-item"><span class="empty-state">No anomalies detected</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ─── CONNECTIONS ──────────────────────────────────────── -->
+  <div id="tab-connections" class="content" style="display:none">
+    <div style="margin-bottom:14px;font-size:12px;color:var(--muted)">
+      Credentials are encrypted with AES-256-GCM before storage. Leave fields blank to skip an exchange.
+    </div>
+    <div class="exchange-grid" id="exchange-grid"></div>
+  </div>
+
+  <!-- ─── KILL SWITCH ──────────────────────────────────────── -->
+  <div id="tab-kill" class="content" style="display:none">
+    <div class="kill-section">
+      <div id="kill-status-card" class="kill-status inactive">
+        <div id="kill-label" class="kill-label" style="color:var(--green)">ENGINE ACTIVE</div>
+        <div class="kill-sub" id="kill-sub">Consensus engine is running normally</div>
+        <div class="kill-reason-text" id="kill-reason-display" style="display:none"></div>
+      </div>
+
+      <div class="card" id="kill-activate-panel">
+        <div class="card-title">Activate Kill Switch</div>
+        <label for="kill-reason">Reason (optional)</label>
+        <input type="text" id="kill-reason" class="kill-reason-input" placeholder="e.g. Flash crash detected">
+        <div class="btn-killwrap">
+          <button id="kill-btn" class="btn-kill" onclick="killPressed()">⚡ KILL SWITCH</button>
+          <div class="confirm-hint" id="kill-hint" style="display:none">Click again within 3s to confirm</div>
+        </div>
+      </div>
+
+      <div class="card" id="kill-clear-panel" style="display:none">
+        <div class="card-title">Deactivate</div>
+        <div class="btn-killwrap">
+          <button class="btn-clear" onclick="deactivateKill()">✓ RESUME ENGINE</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── ALERTS ───────────────────────────────────────────── -->
+  <div id="tab-alerts" class="content" style="display:none">
+    <div class="alerts-layout">
+      <!-- left: config -->
+      <div>
+        <div class="card">
+          <div class="card-title">Webhook Delivery</div>
+          <label>Webhook URL</label>
+          <div class="webhook-row">
+            <input type="text" id="alert-webhook" placeholder="https://hooks.slack.com/…">
+            <button class="btn btn-ghost btn-sm" onclick="testWebhook()">TEST</button>
+          </div>
+          <div class="status-line" id="test-status"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Alert Triggers</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Venue blacklisted</span>
+            <label class="toggle"><input type="checkbox" id="al-bl"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Anomaly — HIGH severity</span>
+            <label class="toggle"><input type="checkbox" id="al-high"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Anomaly — MEDIUM severity</span>
+            <label class="toggle"><input type="checkbox" id="al-med"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Consensus quality LOW</span>
+            <label class="toggle"><input type="checkbox" id="al-low"><span class="slider"></span></label>
+          </div>
+          <div class="threshold-row">
+            <label>Deviation threshold</label>
+            <input type="text" class="threshold-input" id="al-bps" placeholder="0">
+            <span class="unit">bps</span>
+          </div>
+          <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
+            <button class="btn btn-save" onclick="saveAlerts()">SAVE ALERTS</button>
+            <span class="save-msg" id="alert-save-msg">Saved</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- right: recent alert log -->
+      <div class="card">
+        <div class="card-title">Recent Alerts</div>
+        <ul class="anom-list" id="alert-log">
+          <li class="anom-item"><span class="empty-state">No alerts fired yet</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<script>
+// ═══════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════
+const S = {
+  token: '',
+  // per-symbol: { consensus: {...}, venues: [...] }
+  data: {},
+  anomalies: [],
+  alertLog: [],
+  activeSymbol: null,
+  killActive: false,
+  killArmed: false,
+  killArmTimer: null,
+  evtSource: null,
+};
+
+// ═══════════════════════════════════════════════════════
+// Login
+// ═══════════════════════════════════════════════════════
+document.getElementById('tok').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+
+async function doLogin() {
+  const tok = document.getElementById('tok').value.trim();
+  if (!tok) return;
+
+  // Verify token by hitting a protected endpoint.
+  const r = await fetch('/api/kill', { headers: authHeaders(tok) });
+  if (r.status === 401) {
+    document.getElementById('login-err').textContent = 'Invalid token.';
+    return;
+  }
+  S.token = tok;
+  sessionStorage.setItem('token', tok);
+  boot();
+}
+
+function authHeaders(tok) {
+  return { 'Authorization': 'Bearer ' + (tok || S.token) };
+}
+
+// ═══════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════
+function boot() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  connectSSE();
+  loadConnections();
+  loadAlerts();
+}
+
+// ═══════════════════════════════════════════════════════
+// Tabs
+// ═══════════════════════════════════════════════════════
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  ['live','connections','kill','alerts'].forEach(t => {
+    document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
+  });
+  if (name === 'connections') loadConnections();
+  if (name === 'alerts') loadAlerts();
+}
+
+// ═══════════════════════════════════════════════════════
+// SSE
+// ═══════════════════════════════════════════════════════
+function connectSSE() {
+  const url = '/api/events?token=' + encodeURIComponent(S.token);
+  const es = new EventSource(url);
+  S.evtSource = es;
+
+  es.onopen = () => {
+    const el = document.getElementById('sse-status');
+    el.textContent = '● live';
+    el.className = 'conn-indicator ok';
+  };
+  es.onerror = () => {
+    const el = document.getElementById('sse-status');
+    el.textContent = '○ reconnecting…';
+    el.className = 'conn-indicator';
+  };
+  es.onmessage = e => {
+    try {
+      const ev = JSON.parse(e.data);
+      dispatch(ev.type, ev.data);
+    } catch {}
+  };
+}
+
+function dispatch(type, data) {
+  switch (type) {
+    case 'consensus':   handleConsensus(data); break;
+    case 'anomaly':     handleAnomaly(data); break;
+    case 'status':      handleStatus(data); break;
+    case 'kill_switch': handleKillSwitch(data); break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// Consensus events
+// ═══════════════════════════════════════════════════════
+function handleConsensus(d) {
+  const sym = d.symbol;
+  S.data[sym] = d;
+
+  // Ensure symbol tab exists.
+  if (!document.querySelector(`.sym-tab[data-sym="${sym}"]`)) {
+    const tabs = document.getElementById('sym-tabs');
+    const btn = document.createElement('button');
+    btn.className = 'sym-tab' + (S.activeSymbol ? '' : ' active');
+    btn.dataset.sym = sym;
+    btn.textContent = sym;
+    btn.onclick = () => {
+      document.querySelectorAll('.sym-tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      S.activeSymbol = sym;
+      renderConsensus();
+    };
+    tabs.appendChild(btn);
+    if (!S.activeSymbol) S.activeSymbol = sym;
+  }
+
+  if (sym === S.activeSymbol) renderConsensus();
+}
+
+function renderConsensus() {
+  const d = S.data[S.activeSymbol];
+  if (!d) return;
+  const c = d.consensus;
+
+  document.getElementById('cs-mid').textContent  = fmtPrice(c.mid);
+  document.getElementById('cs-buy').textContent  = fmtPrice(c.buy_exec);
+  document.getElementById('cs-sell').textContent = fmtPrice(c.sell_exec);
+  document.getElementById('cs-band').textContent = fmtPrice(c.band_low) + ' – ' + fmtPrice(c.band_high);
+
+  const qEl = document.getElementById('cs-quality');
+  qEl.textContent = c.quality;
+  qEl.className = 'metric-val badge badge-' + c.quality.toLowerCase();
+
+  renderVenues(d.venues);
+}
+
+function renderVenues(venues) {
+  if (!venues || !venues.length) return;
+  const tbody = document.getElementById('venue-tbody');
+  tbody.innerHTML = '';
+  venues.forEach(v => {
+    const tr = document.createElement('tr');
+    const flagHtml = (v.flags || []).map(f => `<span class="flag">${f}</span>`).join('');
+    tr.innerHTML = `
+      <td>${v.venue.toUpperCase()}</td>
+      <td>${statusBadge(v.status)}</td>
+      <td>${pct(v.trust)}</td>
+      <td class="price-cell">${fmtPrice(v.mid)}</td>
+      <td class="price-cell">${fmtPrice(v.buy_exec)}</td>
+      <td class="price-cell">${fmtPrice(v.sell_exec)}</td>
+      <td style="color:${devColor(v.deviation_bps)}">${v.deviation_bps.toFixed(1)}</td>
+      <td>${flagHtml || '<span style="color:var(--muted)">—</span>'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// Status events — update individual venue row badge
+// ═══════════════════════════════════════════════════════
+function handleStatus(d) {
+  // If we have live data for this symbol, re-use it.
+  // The status update doesn't carry full venue metrics, so just trigger a redraw
+  // next time a consensus update arrives — nothing extra needed.
+  addToAlertLog('STATUS', d.status === 'BLACKLISTED' ? 'high' : 'medium',
+    `${d.venue.toUpperCase()} → ${d.status} on ${d.symbol}`, d.reason);
+}
+
+// ═══════════════════════════════════════════════════════
+// Anomaly events
+// ═══════════════════════════════════════════════════════
+function handleAnomaly(d) {
+  S.anomalies.unshift(d);
+  if (S.anomalies.length > 50) S.anomalies.pop();
+  renderAnomalies();
+
+  if (d.severity === 'HIGH' || d.severity === 'MEDIUM') {
+    addToAlertLog('ANOMALY', d.severity.toLowerCase(),
+      `${d.venue.toUpperCase()} on ${d.symbol}: ${d.anomaly_type} ${d.deviation_bps.toFixed(1)} bps`);
+  }
+}
+
+function renderAnomalies() {
+  const ul = document.getElementById('anom-list');
+  if (!S.anomalies.length) {
+    ul.innerHTML = '<li class="anom-item"><span class="empty-state">No anomalies detected</span></li>';
+    return;
+  }
+  ul.innerHTML = '';
+  S.anomalies.slice(0, 30).forEach(a => {
+    const li = document.createElement('li');
+    li.className = 'anom-item ' + a.severity.toLowerCase();
+    li.innerHTML = `
+      <span class="badge ${a.severity === 'HIGH' ? 'badge-bl' : 'badge-warn'}">${a.severity}</span>
+      &nbsp;${a.venue.toUpperCase()} · ${a.symbol} · ${a.anomaly_type}
+      &nbsp;${a.deviation_bps.toFixed(1)} bps
+      <span class="anom-ts">&nbsp;${fmtTime(a.ts_ms)}</span>
+    `;
+    ul.appendChild(li);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// Kill switch events
+// ═══════════════════════════════════════════════════════
+function handleKillSwitch(d) {
+  S.killActive = d.active;
+  const badge   = document.getElementById('kill-badge');
+  const badgeT  = document.getElementById('kill-badge-text');
+  const card    = document.getElementById('kill-status-card');
+  const lbl     = document.getElementById('kill-label');
+  const sub     = document.getElementById('kill-sub');
+  const reasonD = document.getElementById('kill-reason-display');
+  const actPanel = document.getElementById('kill-activate-panel');
+  const clrPanel = document.getElementById('kill-clear-panel');
+
+  if (d.active) {
+    badge.className = 'kill-badge active';
+    badgeT.textContent = '⚡ KILL ACTIVE';
+    card.className = 'kill-status active';
+    lbl.style.color = 'var(--red)';
+    lbl.textContent = 'ENGINE HALTED';
+    sub.textContent = 'Kill switch active since ' + fmtTime(d.activated_at_ms);
+    if (d.reason) {
+      reasonD.textContent = 'Reason: ' + d.reason;
+      reasonD.style.display = '';
+    } else {
+      reasonD.style.display = 'none';
+    }
+    actPanel.style.display = 'none';
+    clrPanel.style.display = '';
+  } else {
+    badge.className = 'kill-badge inactive';
+    badgeT.textContent = 'ENGINE ACTIVE';
+    card.className = 'kill-status inactive';
+    lbl.style.color = 'var(--green)';
+    lbl.textContent = 'ENGINE ACTIVE';
+    sub.textContent = 'Consensus engine is running normally';
+    reasonD.style.display = 'none';
+    actPanel.style.display = '';
+    clrPanel.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// Kill switch actions
+// ═══════════════════════════════════════════════════════
+function killPressed() {
+  if (!S.killArmed) {
+    // First press: arm.
+    S.killArmed = true;
+    const btn  = document.getElementById('kill-btn');
+    const hint = document.getElementById('kill-hint');
+    btn.classList.add('armed');
+    hint.style.display = '';
+    S.killArmTimer = setTimeout(() => {
+      S.killArmed = false;
+      btn.classList.remove('armed');
+      hint.style.display = 'none';
+    }, 3000);
+  } else {
+    // Second press within 3s: fire.
+    clearTimeout(S.killArmTimer);
+    S.killArmed = false;
+    document.getElementById('kill-btn').classList.remove('armed');
+    document.getElementById('kill-hint').style.display = 'none';
+    activateKill();
+  }
+}
+
+async function activateKill() {
+  const reason = document.getElementById('kill-reason').value.trim();
+  const r = await fetch('/api/kill', {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+  if (!r.ok) console.error('kill switch activate failed', r.status);
+}
+
+async function deactivateKill() {
+  const r = await fetch('/api/kill', {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!r.ok) console.error('kill switch deactivate failed', r.status);
+}
+
+// ═══════════════════════════════════════════════════════
+// Connections
+// ═══════════════════════════════════════════════════════
+async function loadConnections() {
+  const r = await fetch('/api/connections', { headers: authHeaders() });
+  if (!r.ok) return;
+  const conns = await r.json();
+  renderConnections(conns);
+}
+
+function renderConnections(conns) {
+  const grid = document.getElementById('exchange-grid');
+  grid.innerHTML = '';
+  conns.forEach(c => {
+    const needsPass = ['okx', 'gate', 'htx'].includes(c.exchange);
+    const card = document.createElement('div');
+    card.className = 'exchange-card';
+    card.innerHTML = `
+      <div class="exchange-header">
+        <span class="exchange-name">${c.exchange}</span>
+        <div class="config-dot ${c.configured ? 'yes' : 'no'}" title="${c.configured ? 'Configured' : 'Not configured'}"></div>
+      </div>
+      <label>API Key</label>
+      <input type="text" id="key-${c.exchange}" placeholder="${c.configured ? '••••••••' : 'API Key'}" autocomplete="off">
+      <label>API Secret</label>
+      <input type="password" id="sec-${c.exchange}" placeholder="${c.configured ? '••••••••' : 'API Secret'}" autocomplete="new-password">
+      ${needsPass ? `<label>Passphrase</label><input type="password" id="pass-${c.exchange}" placeholder="${c.configured ? '••••••••' : 'Passphrase (if required)'}" autocomplete="new-password">` : ''}
+      <div style="display:flex;align-items:center;margin-top:4px">
+        <button class="btn btn-save btn-sm" onclick="saveConn('${c.exchange}')">SAVE</button>
+        <span class="save-msg" id="saved-${c.exchange}">Saved ✓</span>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+async function saveConn(exchange) {
+  const keyEl  = document.getElementById('key-'  + exchange);
+  const secEl  = document.getElementById('sec-'  + exchange);
+  const passEl = document.getElementById('pass-' + exchange);
+
+  const body = {
+    api_key:    keyEl  ? keyEl.value.trim()  : '',
+    api_secret: secEl  ? secEl.value.trim()  : '',
+    passphrase: passEl ? passEl.value.trim() : '',
+  };
+
+  const r = await fetch('/api/connections/' + exchange, {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (r.ok) {
+    const msg = document.getElementById('saved-' + exchange);
+    msg.classList.add('show');
+    setTimeout(() => msg.classList.remove('show'), 2500);
+    // Clear fields after save.
+    if (keyEl)  keyEl.value  = '';
+    if (secEl)  secEl.value  = '';
+    if (passEl) passEl.value = '';
+    loadConnections(); // refresh dots
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// Alerts
+// ═══════════════════════════════════════════════════════
+async function loadAlerts() {
+  const r = await fetch('/api/alerts', { headers: authHeaders() });
+  if (!r.ok) return;
+  const cfg = await r.json();
+  document.getElementById('alert-webhook').value  = cfg.webhook_url         || '';
+  document.getElementById('al-bl').checked        = !!cfg.on_venue_blacklisted;
+  document.getElementById('al-high').checked      = !!cfg.on_anomaly_high;
+  document.getElementById('al-med').checked       = !!cfg.on_anomaly_medium;
+  document.getElementById('al-low').checked       = !!cfg.on_quality_low;
+  document.getElementById('al-bps').value         = cfg.deviation_bps_thresh > 0 ? cfg.deviation_bps_thresh : '';
+}
+
+async function saveAlerts() {
+  const cfg = {
+    webhook_url:         document.getElementById('alert-webhook').value.trim(),
+    on_venue_blacklisted:document.getElementById('al-bl').checked,
+    on_anomaly_high:     document.getElementById('al-high').checked,
+    on_anomaly_medium:   document.getElementById('al-med').checked,
+    on_quality_low:      document.getElementById('al-low').checked,
+    deviation_bps_thresh:parseFloat(document.getElementById('al-bps').value) || 0,
+  };
+  const r = await fetch('/api/alerts', {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg),
+  });
+  if (r.ok) {
+    const msg = document.getElementById('alert-save-msg');
+    msg.classList.add('show');
+    setTimeout(() => msg.classList.remove('show'), 2500);
+  }
+}
+
+async function testWebhook() {
+  const btn = document.querySelector('[onclick="testWebhook()"]');
+  const st  = document.getElementById('test-status');
+  btn.textContent = '…';
+  btn.disabled = true;
+  const r = await fetch('/api/alerts/test', { method: 'POST', headers: authHeaders() });
+  btn.textContent = 'TEST';
+  btn.disabled = false;
+  if (r.ok) {
+    st.textContent = '✓ Test payload delivered';
+    st.className = 'status-line ok';
+  } else {
+    const err = await r.json().catch(() => ({ error: 'unknown' }));
+    st.textContent = '✗ ' + err.error;
+    st.className = 'status-line err';
+  }
+  setTimeout(() => { st.textContent = ''; st.className = 'status-line'; }, 5000);
+}
+
+// ═══════════════════════════════════════════════════════
+// Alert log (in-UI)
+// ═══════════════════════════════════════════════════════
+function addToAlertLog(type, severity, message, detail) {
+  S.alertLog.unshift({ type, severity, message, detail, ts: Date.now() });
+  if (S.alertLog.length > 50) S.alertLog.pop();
+  renderAlertLog();
+}
+
+function renderAlertLog() {
+  const ul = document.getElementById('alert-log');
+  if (!S.alertLog.length) {
+    ul.innerHTML = '<li class="anom-item"><span class="empty-state">No alerts fired yet</span></li>';
+    return;
+  }
+  ul.innerHTML = '';
+  S.alertLog.slice(0, 30).forEach(a => {
+    const li = document.createElement('li');
+    li.className = 'anom-item ' + (a.severity || '');
+    li.innerHTML = `
+      <span class="badge ${a.severity === 'high' ? 'badge-bl' : 'badge-warn'}">${a.type}</span>
+      &nbsp;${escHtml(a.message)}
+      ${a.detail ? '<br><span style="color:var(--muted);font-size:10px">' + escHtml(a.detail) + '</span>' : ''}
+      <span class="anom-ts">&nbsp;${fmtTime(a.ts)}</span>
+    `;
+    ul.appendChild(li);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════
+function statusBadge(s) {
+  const m = { OK:'badge-ok', WARN:'badge-warn', BLACKLISTED:'badge-bl' };
+  return `<span class="badge ${m[s] || ''}">${s}</span>`;
+}
+
+function fmtPrice(v) {
+  if (!v) return '—';
+  return v >= 1000 ? v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                   : v.toFixed(4);
+}
+
+function pct(v) { return v != null ? (v * 100).toFixed(1) + '%' : '—'; }
+
+function devColor(bps) {
+  if (!bps) return 'var(--muted)';
+  if (bps > 50) return 'var(--red)';
+  if (bps > 25) return 'var(--yellow)';
+  return 'var(--text)';
+}
+
+function fmtTime(ms) {
+  if (!ms) return '';
+  return new Date(ms).toLocaleTimeString('en-US', { hour12: false });
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ═══════════════════════════════════════════════════════
+// Auto-login from sessionStorage on page load
+// ═══════════════════════════════════════════════════════
+(async () => {
+  const saved = sessionStorage.getItem('token');
+  if (saved) {
+    const r = await fetch('/api/kill', { headers: authHeaders(saved) });
+    if (r.ok) {
+      S.token = saved;
+      boot();
+      return;
+    }
+    sessionStorage.removeItem('token');
+  }
+})();
+</script>
+</body>
+</html>
