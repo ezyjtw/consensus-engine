@@ -40,6 +40,7 @@ depth_penalty_bps: 20.0
 redis:
   addr: "localhost:6379"
   password: ""
+  use_tls: false   # set to true (or REDIS_TLS=true env) for Upstash / any TLS endpoint
   input_stream: "market:quotes"
   output_consensus: "consensus:updates"
   output_anomalies: "consensus:anomalies"

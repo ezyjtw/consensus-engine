@@ -2,6 +2,7 @@ package eventbus
 
 import (
         "context"
+        "crypto/tls"
         "encoding/json"
         "fmt"
         "time"
@@ -13,6 +14,7 @@ import (
 type RedisConfig struct {
         Addr            string
         Password        string
+        UseTLS          bool
         InputStream     string
         OutputConsensus string
         OutputAnomalies string
@@ -29,10 +31,14 @@ type Bus struct {
 }
 
 func New(cfg RedisConfig) (*Bus, error) {
-        rdb := redis.NewClient(&redis.Options{
+        opts := &redis.Options{
                 Addr:     cfg.Addr,
                 Password: cfg.Password,
-        })
+        }
+        if cfg.UseTLS {
+                opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+        }
+        rdb := redis.NewClient(opts)
         ctx := context.Background()
         err := rdb.XGroupCreateMkStream(ctx, cfg.InputStream,
                 cfg.ConsumerGroup, "$").Err()

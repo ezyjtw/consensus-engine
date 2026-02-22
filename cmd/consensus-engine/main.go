@@ -43,6 +43,7 @@ func main() {
         bus, err := eventbus.New(eventbus.RedisConfig{
                 Addr:            policy.Redis.Addr,
                 Password:        policy.Redis.Password,
+                UseTLS:          policy.Redis.UseTLS,
                 InputStream:     policy.Redis.InputStream,
                 OutputConsensus: policy.Redis.OutputConsensus,
                 OutputAnomalies: policy.Redis.OutputAnomalies,

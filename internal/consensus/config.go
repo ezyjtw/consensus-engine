@@ -36,6 +36,7 @@ type Policy struct {
 type RedisConfig struct {
 	Addr            string `yaml:"addr"`
 	Password        string `yaml:"password"`
+	UseTLS          bool   `yaml:"use_tls"`
 	InputStream     string `yaml:"input_stream"`
 	OutputConsensus string `yaml:"output_consensus"`
 	OutputAnomalies string `yaml:"output_anomalies"`
@@ -68,6 +69,9 @@ func (p *Policy) ApplyEnvOverrides() {
 	}
 	if pass := os.Getenv("REDIS_PASSWORD"); pass != "" {
 		p.Redis.Password = pass
+	}
+	if os.Getenv("REDIS_TLS") == "true" {
+		p.Redis.UseTLS = true
 	}
 }
 
