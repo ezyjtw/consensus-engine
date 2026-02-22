@@ -29,11 +29,10 @@ func ComputeTrust(base float64, p TrustPenalties) float64 {
 		}
 		t *= 1.0 - 0.6*fraction
 	}
-	if p.SpreadBps > 10 {
-		t *= 0.80
-	}
 	if p.SpreadBps > 25 {
 		t *= 0.70
+	} else if p.SpreadBps > 10 {
+		t *= 0.80
 	}
 	return t
 }
@@ -47,12 +46,8 @@ func NormalizeTrust(weights map[Venue]float64) map[Venue]float64 {
 	}
 	norm := make(map[Venue]float64, len(weights))
 	if sum < epsilon {
-		if n := len(weights); n > 0 {
-			eq := 1.0 / float64(n)
-			for v := range weights {
-				norm[v] = eq
-			}
-		}
+		// All venues have zero trust (e.g. all blacklisted).
+		// Return all-zero weights so no venue influences the consensus.
 		return norm
 	}
 	for v, w := range weights {

@@ -37,6 +37,7 @@ func New(cfg RedisConfig) (*Bus, error) {
         err := rdb.XGroupCreateMkStream(ctx, cfg.InputStream,
                 cfg.ConsumerGroup, "$").Err()
         if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+                _ = rdb.Close()
                 return nil, fmt.Errorf("creating consumer group: %w", err)
         }
         return &Bus{rdb: rdb, cfg: cfg}, nil
