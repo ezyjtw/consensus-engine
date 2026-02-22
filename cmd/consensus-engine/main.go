@@ -6,6 +6,7 @@ import (
         "log"
         "os"
         "os/signal"
+        "strings"
         "syscall"
         "time"
 
@@ -29,12 +30,28 @@ func main() {
         } else {
                 log.Println("REDIS_PASSWORD not set, using default from policy file")
         }
+        if tls := os.Getenv("REDIS_TLS"); tls != "" {
+                log.Printf("REDIS_TLS detected: %q (must be exactly \"true\" to enable TLS)", tls)
+        } else {
+                log.Println("REDIS_TLS not set, TLS disabled unless policy file sets use_tls: true")
+        }
 
         policy, err := consensus.LoadPolicy(*cfgPath)
         if err != nil {
                 log.Fatalf("failed to load policy: %v", err)
         }
 
+        log.Printf("Active policy: stale_ms=%d outlier_warn=%.0f bps outlier_blacklist=%.0f bps "+
+                "warn_persist=%dms blacklist_persist=%dms blacklist_ttl=%dms recovery=%dms "+
+                "min_core_quorum=%d core_venues=[%s] tls=%v",
+                policy.StaleMs,
+                policy.OutlierBpsWarn, policy.OutlierBpsBlacklist,
+                policy.WarnPersistMs, policy.BlacklistPersistMs,
+                policy.BlacklistTtlMs, policy.RecoveryMs,
+                policy.MinCoreQuorum,
+                strings.Join(policy.CoreVenues, ","),
+                policy.Redis.UseTLS,
+        )
         log.Printf("Redis address: %s", policy.Redis.Addr)
 
         quoteStore := store.New(policy.StaleMs)
@@ -43,6 +60,7 @@ func main() {
         bus, err := eventbus.New(eventbus.RedisConfig{
                 Addr:            policy.Redis.Addr,
                 Password:        policy.Redis.Password,
+                UseTLS:          policy.Redis.UseTLS,
                 InputStream:     policy.Redis.InputStream,
                 OutputConsensus: policy.Redis.OutputConsensus,
                 OutputAnomalies: policy.Redis.OutputAnomalies,
@@ -55,7 +73,11 @@ func main() {
         if err != nil {
                 log.Fatalf("failed to create event bus: %v", err)
         }
-        defer bus.Close()
+        defer func() {
+                if err := bus.Close(); err != nil {
+                        log.Printf("error closing event bus: %v", err)
+                }
+        }()
 
         ctx, cancel := signal.NotifyContext(context.Background(),
                 os.Interrupt, syscall.SIGTERM)
@@ -106,7 +128,10 @@ func main() {
                         for v, ns := range result.NewStatuses {
                                 quoteStore.SetStatus(sk.tenantID, sk.symbol, v, ns)
                         }
-                        if err := bus.PublishConsensus(ctx, result.Update); err != nil {
+                        if result.Update.Consensus.Mid == 0 {
+                                log.Printf("consensus unavailable for %s/%s: all venues have zero trust",
+                                        sk.tenantID, sk.symbol)
+                        } else if err := bus.PublishConsensus(ctx, result.Update); err != nil {
                                 log.Printf("publish consensus error: %v", err)
                         }
                         for _, a := range result.Anomalies {

@@ -2,8 +2,11 @@ package eventbus
 
 import (
         "context"
+        "crypto/tls"
         "encoding/json"
         "fmt"
+        "log"
+        "strings"
         "time"
 
         "github.com/redis/go-redis/v9"
@@ -13,6 +16,7 @@ import (
 type RedisConfig struct {
         Addr            string
         Password        string
+        UseTLS          bool
         InputStream     string
         OutputConsensus string
         OutputAnomalies string
@@ -29,14 +33,18 @@ type Bus struct {
 }
 
 func New(cfg RedisConfig) (*Bus, error) {
-        rdb := redis.NewClient(&redis.Options{
+        opts := &redis.Options{
                 Addr:     cfg.Addr,
                 Password: cfg.Password,
-        })
+        }
+        if cfg.UseTLS {
+                opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+        }
+        rdb := redis.NewClient(opts)
         ctx := context.Background()
         err := rdb.XGroupCreateMkStream(ctx, cfg.InputStream,
                 cfg.ConsumerGroup, "$").Err()
-        if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+        if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
                 _ = rdb.Close()
                 return nil, fmt.Errorf("creating consumer group: %w", err)
         }
@@ -62,15 +70,19 @@ func (b *Bus) ReadMarketUpdates(ctx context.Context) ([]consensus.Quote, error) 
                 for _, msg := range stream.Messages {
                         raw, ok := msg.Values["data"].(string)
                         if !ok {
+                                log.Printf("eventbus: msg %s missing 'data' field, skipping", msg.ID)
                                 continue
                         }
                         var q consensus.Quote
                         if err := json.Unmarshal([]byte(raw), &q); err != nil {
+                                log.Printf("eventbus: msg %s unmarshal error: %v, skipping", msg.ID, err)
                                 continue
                         }
                         quotes = append(quotes, q)
-                        _ = b.rdb.XAck(ctx, b.cfg.InputStream,
-                                b.cfg.ConsumerGroup, msg.ID)
+                        if err := b.rdb.XAck(ctx, b.cfg.InputStream,
+                                b.cfg.ConsumerGroup, msg.ID).Err(); err != nil {
+                                log.Printf("eventbus: XAck msg %s failed: %v", msg.ID, err)
+                        }
                 }
         }
         return quotes, nil
