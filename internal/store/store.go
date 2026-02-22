@@ -31,8 +31,8 @@ func New(staleMs int64) *Store {
 func (s *Store) UpsertQuote(q consensus.Quote) {
 	k := Key{TenantID: q.TenantID, Symbol: q.Symbol, Venue: q.Venue}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.quotes[k] = q
-	s.mu.Unlock()
 }
 
 func (s *Store) LiveQuotes(tenantID string, symbol consensus.Symbol) map[consensus.Venue]consensus.Quote {
@@ -68,6 +68,6 @@ func (s *Store) SetStatus(tenantID string, symbol consensus.Symbol,
 	venue consensus.Venue, vs consensus.VenueStatus) {
 	k := Key{TenantID: tenantID, Symbol: symbol, Venue: venue}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.status[k] = vs
-	s.mu.Unlock()
 }
