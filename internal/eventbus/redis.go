@@ -32,7 +32,20 @@ type Bus struct {
         cfg RedisConfig
 }
 
-func New(cfg RedisConfig) (*Bus, error) {
+func buildRedisOptions(cfg RedisConfig) (*redis.Options, error) {
+        if strings.HasPrefix(cfg.Addr, "redis://") || strings.HasPrefix(cfg.Addr, "rediss://") {
+                opts, err := redis.ParseURL(cfg.Addr)
+                if err != nil {
+                        return nil, fmt.Errorf("parsing redis URL: %w", err)
+                }
+                if cfg.Password != "" {
+                        opts.Password = cfg.Password
+                }
+                if cfg.UseTLS && opts.TLSConfig == nil {
+                        opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+                }
+                return opts, nil
+        }
         opts := &redis.Options{
                 Addr:     cfg.Addr,
                 Password: cfg.Password,
@@ -40,9 +53,17 @@ func New(cfg RedisConfig) (*Bus, error) {
         if cfg.UseTLS {
                 opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
         }
+        return opts, nil
+}
+
+func New(cfg RedisConfig) (*Bus, error) {
+        opts, err := buildRedisOptions(cfg)
+        if err != nil {
+                return nil, err
+        }
         rdb := redis.NewClient(opts)
         ctx := context.Background()
-        err := rdb.XGroupCreateMkStream(ctx, cfg.InputStream,
+        err = rdb.XGroupCreateMkStream(ctx, cfg.InputStream,
                 cfg.ConsumerGroup, "$").Err()
         if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
                 _ = rdb.Close()
