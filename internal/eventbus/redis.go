@@ -124,6 +124,16 @@ func (b *Bus) PublishStatusUpdate(ctx context.Context,
         }).Err()
 }
 
+// KillSwitchActive returns true when the dashboard kill switch is active.
+// The consensus engine checks this before publishing outputs.
+func (b *Bus) KillSwitchActive(ctx context.Context) bool {
+        val, err := b.rdb.Exists(ctx, "kill:switch").Result()
+        if err != nil {
+                return false
+        }
+        return val > 0
+}
+
 func (b *Bus) Close() error {
         return b.rdb.Close()
 }

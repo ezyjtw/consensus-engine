@@ -115,6 +115,12 @@ func main() {
                                 symbol: q.Symbol}] = true
                 }
 
+                // Skip compute+publish while the dashboard kill switch is active.
+                if bus.KillSwitchActive(ctx) {
+                        log.Println("kill switch active — skipping consensus compute")
+                        continue
+                }
+
                 for sk := range toRecompute {
                         liveQuotes := quoteStore.LiveQuotes(sk.tenantID, sk.symbol)
                         if len(liveQuotes) == 0 {
