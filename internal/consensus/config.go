@@ -3,6 +3,7 @@ package consensus
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -70,7 +71,7 @@ func (p *Policy) ApplyEnvOverrides() {
 	if pass := os.Getenv("REDIS_PASSWORD"); pass != "" {
 		p.Redis.Password = pass
 	}
-	if os.Getenv("REDIS_TLS") == "true" {
+	if strings.EqualFold(os.Getenv("REDIS_TLS"), "true") {
 		p.Redis.UseTLS = true
 	}
 }

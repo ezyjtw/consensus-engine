@@ -30,6 +30,11 @@ func main() {
         } else {
                 log.Println("REDIS_PASSWORD not set, using default from policy file")
         }
+        if tls := os.Getenv("REDIS_TLS"); tls != "" {
+                log.Printf("REDIS_TLS detected: %q (must be exactly \"true\" to enable TLS)", tls)
+        } else {
+                log.Println("REDIS_TLS not set, TLS disabled unless policy file sets use_tls: true")
+        }
 
         policy, err := consensus.LoadPolicy(*cfgPath)
         if err != nil {
