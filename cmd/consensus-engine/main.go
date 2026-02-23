@@ -10,9 +10,9 @@ import (
         "syscall"
         "time"
 
-        "github.com/yourorg/consensus-engine/internal/consensus"
-        "github.com/yourorg/consensus-engine/internal/eventbus"
-        "github.com/yourorg/consensus-engine/internal/store"
+        "github.com/yourorg/arbsuite/internal/consensus"
+        "github.com/yourorg/arbsuite/internal/eventbus"
+        "github.com/yourorg/arbsuite/internal/store"
 )
 
 func main() {

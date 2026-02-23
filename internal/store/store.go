@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourorg/consensus-engine/internal/consensus"
+	"github.com/yourorg/arbsuite/internal/consensus"
 )
 
 type Key struct {

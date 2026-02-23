@@ -10,7 +10,7 @@ import (
         "time"
 
         "github.com/redis/go-redis/v9"
-        "github.com/yourorg/consensus-engine/internal/consensus"
+        "github.com/yourorg/arbsuite/internal/consensus"
 )
 
 type RedisConfig struct {
