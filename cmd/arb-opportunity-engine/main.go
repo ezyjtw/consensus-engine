@@ -11,6 +11,7 @@ import (
 
 	"github.com/ezyjtw/consensus-engine/internal/arb"
 	"github.com/ezyjtw/consensus-engine/internal/eventbus"
+	"github.com/ezyjtw/consensus-engine/internal/redact"
 )
 
 func main() {
@@ -20,7 +21,7 @@ func main() {
 
 	// Log env vars that override config (mirrors consensus-engine convention).
 	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
-		log.Printf("REDIS_ADDR detected: %s", addr)
+		log.Printf("REDIS_ADDR detected: %s", redact.RedisAddr(addr))
 	} else {
 		log.Println("REDIS_ADDR not set, using default from policy file")
 	}
@@ -47,7 +48,7 @@ func main() {
 		policy.IgnoreFlaggedVenues,
 	)
 	log.Printf("Redis: addr=%s tls=%v input=%s output=%s",
-		policy.Redis.Addr, policy.Redis.UseTLS,
+		redact.RedisAddr(policy.Redis.Addr), policy.Redis.UseTLS,
 		policy.Redis.InputStream, policy.Redis.OutputIntents,
 	)
 

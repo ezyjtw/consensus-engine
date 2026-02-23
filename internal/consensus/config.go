@@ -11,6 +11,10 @@ import (
 type Policy struct {
 	SizeNotionalUSD float64 `yaml:"size_notional_usd"`
 	StaleMs         int64   `yaml:"stale_ms"`
+	// StalePauseMs: if every quote for a symbol is older than this many ms,
+	// the engine skips consensus and returns quality=LOW. Prevents publishing
+	// stale prices during feed outages. 0 = disabled (use stale_ms only).
+	StalePauseMs int64 `yaml:"stale_pause_ms"`
 
 	OutlierBpsWarn      float64 `yaml:"outlier_bps_warn"`
 	OutlierBpsBlacklist float64 `yaml:"outlier_bps_blacklist"`

@@ -14,6 +14,7 @@ import (
 	"github.com/ezyjtw/consensus-engine/internal/eventbus"
 	"github.com/ezyjtw/consensus-engine/internal/execution"
 	"github.com/ezyjtw/consensus-engine/internal/ledger"
+	"github.com/ezyjtw/consensus-engine/internal/redact"
 	"github.com/ezyjtw/consensus-engine/internal/risk"
 )
 
@@ -22,7 +23,7 @@ func main() {
 	flag.Parse()
 
 	if v := os.Getenv("REDIS_ADDR"); v != "" {
-		log.Printf("REDIS_ADDR: %s", v)
+		log.Printf("REDIS_ADDR: %s", redact.RedisAddr(v))
 	}
 	if *pgDSN == "" {
 		*pgDSN = os.Getenv("POSTGRES_DSN")

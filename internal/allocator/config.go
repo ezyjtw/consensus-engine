@@ -15,6 +15,11 @@ type Policy struct {
 	MinQualityForFunding     string             `yaml:"min_quality_for_funding"`
 	MinQualityForLiquidity   string             `yaml:"min_quality_for_liquidity"`
 
+	// MaxSingleIntentPct limits any single intent's notional as a percentage of
+	// its strategy cap. Prevents position concentration risk.
+	// 0 = disabled. 25 = no single intent may exceed 25% of the strategy cap.
+	MaxSingleIntentPct float64 `yaml:"max_single_intent_pct"`
+
 	// KellyFraction applies fractional Kelly position sizing to each approved intent.
 	// 0 = disabled (full notional up to cap).
 	// 0.25 = quarter-Kelly (recommended for crypto — conservative and risk-adjusted).

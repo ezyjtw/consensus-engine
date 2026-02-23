@@ -66,6 +66,14 @@ func (e *Engine) Evaluate(intent arb.TradeIntent, systemMode, consensusQuality s
 	if stratCap == 0 {
 		return e.reject(intent, "strategy_not_configured")
 	}
+	// Gate 4b: per-position concentration limit.
+	if e.policy.MaxSingleIntentPct > 0 {
+		maxIntentUSD := stratCap * e.policy.MaxSingleIntentPct / 100
+		if intentNotional > maxIntentUSD {
+			return e.reject(intent, "single_intent_concentration_exceeded")
+		}
+	}
+
 	currentStrat := e.strategyDeployed[intent.Strategy]
 	available := stratCap - currentStrat
 	if available <= 0 {
