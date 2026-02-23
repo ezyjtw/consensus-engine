@@ -12,7 +12,7 @@ import (
 	"syscall"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/yourorg/consensus-engine/internal/dashboard"
+	"github.com/yourorg/arbsuite/internal/dashboard"
 )
 
 func main() {

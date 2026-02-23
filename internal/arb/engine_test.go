@@ -3,8 +3,8 @@ package arb_test
 import (
 	"testing"
 
-	"github.com/yourorg/consensus-engine/internal/arb"
-	"github.com/yourorg/consensus-engine/internal/consensus"
+	"github.com/yourorg/arbsuite/internal/arb"
+	"github.com/yourorg/arbsuite/internal/consensus"
 )
 
 const baseTS = int64(1700000000000)
