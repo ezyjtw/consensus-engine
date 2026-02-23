@@ -271,6 +271,25 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
 .admin-only{display:none}
 .trader-up{display:none}
 
+/* ── equity curve ────────────────────────────────────────── */
+.equity-chart-wrap{
+  width:100%;height:120px;position:relative;overflow:hidden;
+  background:var(--surface2);border-radius:4px;margin-top:12px;
+}
+.equity-chart-wrap svg{width:100%;height:100%}
+.equity-zero-line{stroke:var(--border);stroke-width:1;stroke-dasharray:3,3}
+.equity-line{stroke:var(--green);stroke-width:2;fill:none}
+.equity-line.negative{stroke:var(--red)}
+.equity-area{fill:rgba(16,185,129,.1)}
+.equity-area.negative{fill:rgba(239,68,68,.1)}
+.equity-label{font-family:var(--mono);font-size:10px;fill:var(--muted)}
+
+/* ── mode badge colours ──────────────────────────────────── */
+#mode-badge.running{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.3);color:var(--green)}
+#mode-badge.paused{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.3);color:var(--yellow)}
+#mode-badge.safe{background:rgba(249,115,22,.12);border-color:rgba(249,115,22,.3);color:var(--orange)}
+#mode-badge.flatten,#mode-badge.halted{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3);color:var(--red)}
+
 </style>
 </head>
 <body>
@@ -299,6 +318,8 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
+      <span id="mode-badge" style="display:none;padding:3px 9px;border-radius:3px;font-size:10px;letter-spacing:.08em;border:1px solid var(--border);color:var(--muted)">RUNNING</span>
+      <span id="paper-badge" style="display:none;padding:3px 9px;border-radius:3px;font-size:10px;letter-spacing:.08em;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:var(--yellow)">PAPER</span>
       <span id="role-badge" class="role-badge" style="display:none"></span>
       <div class="conn-indicator" id="sse-status">◌ connecting...</div>
     </div>
@@ -451,8 +472,6 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
     </div>
   </div>
 
-</div><!-- #app -->
-
 <script>
 // ═══════════════════════════════════════════════════════
 // State
@@ -509,6 +528,67 @@ async function boot() {
   connectSSE();
   loadConnections();
   loadAlerts();
+  // Start polling system mode and paper mode for the topbar badges.
+  pollSystemStatus();
+  setInterval(pollSystemStatus, 30000);
+}
+
+// ═══════════════════════════════════════════════════════
+// Topbar status badges
+// ═══════════════════════════════════════════════════════
+async function pollSystemStatus() {
+  try {
+    const [modeResp, paperResp] = await Promise.all([
+      fetch('/api/mode', { headers: authHeaders() }),
+      fetch('/api/paper/mode', { headers: authHeaders() }),
+    ]);
+    if (modeResp.ok) {
+      const d = await modeResp.json();
+      renderModeBadge(d.mode || 'RUNNING');
+    }
+    if (paperResp.ok) {
+      const d = await paperResp.json();
+      renderPaperBadge(d.mode || 'PAPER');
+    }
+  } catch(e) { /* non-fatal */ }
+}
+
+function renderModeBadge(mode) {
+  const el = document.getElementById('mode-badge');
+  if (!el) return;
+  el.textContent = mode;
+  el.className = '';
+  el.id = 'mode-badge'; // keep id
+  el.style.display = '';
+  const cls = mode.toLowerCase();
+  el.className = cls; // applies .running/.paused/.safe/.flatten CSS
+  el.style.padding = '3px 9px';
+  el.style.borderRadius = '3px';
+  el.style.fontSize = '10px';
+  el.style.letterSpacing = '.08em';
+  el.style.border = '1px solid';
+}
+
+function renderPaperBadge(mode) {
+  const el = document.getElementById('paper-badge');
+  if (!el) return;
+  if (mode === 'LIVE') {
+    el.textContent = 'LIVE';
+    el.style.background = 'rgba(239,68,68,.12)';
+    el.style.borderColor = 'rgba(239,68,68,.3)';
+    el.style.color = 'var(--red)';
+  } else if (mode === 'SHADOW') {
+    el.textContent = 'SHADOW';
+    el.style.background = 'rgba(59,130,246,.12)';
+    el.style.borderColor = 'rgba(59,130,246,.3)';
+    el.style.color = 'var(--accent)';
+  } else {
+    el.textContent = 'PAPER';
+    el.style.background = 'rgba(245,158,11,.12)';
+    el.style.borderColor = 'rgba(245,158,11,.3)';
+    el.style.color = 'var(--yellow)';
+  }
+  el.style.display = '';
 }
 
 async function fetchRole() {
@@ -1059,6 +1139,8 @@ async function setMode(mode) {
 // P&L tab
 // ═══════════════════════════════════════════════════════
 async function loadPnL() {
+  // Load equity curve alongside PnL data.
+  loadEquityCurve();
   try {
     const [pnlResp, kpiResp] = await Promise.all([
       fetch('/api/pnl', { headers: authHeaders() }),
@@ -1100,6 +1182,69 @@ async function loadPnL() {
       document.getElementById('kpi-slippage').textContent = slippage.toFixed(2) + ' bps';
     }
   } catch(e) { console.warn('loadPnL:', e); }
+}
+
+// ═══════════════════════════════════════════════════════
+// Equity curve
+// ═══════════════════════════════════════════════════════
+async function loadEquityCurve() {
+  try {
+    const r = await fetch('/api/equity-curve?limit=500', { headers: authHeaders() });
+    if (!r.ok) return;
+    const data = await r.json();
+    const points = data.points || [];
+    const emptyEl = document.getElementById('equity-empty');
+    const svgEl = document.getElementById('equity-svg');
+    const totalLabel = document.getElementById('equity-total-label');
+    if (!svgEl) return;
+
+    if (!points.length) {
+      if (emptyEl) emptyEl.style.display = '';
+      svgEl.style.display = 'none';
+      return;
+    }
+    if (emptyEl) emptyEl.style.display = 'none';
+    svgEl.style.display = '';
+
+    const totalPnL = data.total_pnl || 0;
+    if (totalLabel) {
+      totalLabel.textContent = (totalPnL >= 0 ? '+' : '') + fmtUSD(totalPnL);
+      totalLabel.style.color = totalPnL >= 0 ? 'var(--green)' : 'var(--red)';
+    }
+
+    // Build SVG path from cumulative PnL values.
+    const vals = points.map(p => p.cum_pnl_usd);
+    const minV = Math.min(0, ...vals);
+    const maxV = Math.max(0, ...vals);
+    const range = maxV - minV || 1;
+    const W = 600, H = 120, PAD = 8;
+    const xScale = (W - PAD * 2) / Math.max(vals.length - 1, 1);
+    const yScale = (H - PAD * 2) / range;
+
+    // Zero line y-coordinate.
+    const zeroY = PAD + (maxV / range) * (H - PAD * 2);
+    const zeroYClamped = Math.min(H - PAD, Math.max(PAD, zeroY));
+
+    const toX = i => PAD + i * xScale;
+    const toY = v => PAD + (maxV - v) * yScale;
+
+    const pathD = vals.map((v, i) => (i === 0 ? 'M' : 'L') + toX(i).toFixed(1) + ',' + toY(v).toFixed(1)).join(' ');
+    const firstX = toX(0).toFixed(1);
+    const lastX = toX(vals.length - 1).toFixed(1);
+    const isNeg = totalPnL < 0;
+    const lineClass = 'equity-line' + (isNeg ? ' negative' : '');
+    const areaClass = 'equity-area' + (isNeg ? ' negative' : '');
+    const areaD = pathD + ` L${lastX},${zeroYClamped.toFixed(1)} L${firstX},${zeroYClamped.toFixed(1)} Z`;
+
+    svgEl.innerHTML = `
+      <line class="equity-zero-line" x1="${PAD}" y1="${zeroYClamped.toFixed(1)}" x2="${W - PAD}" y2="${zeroYClamped.toFixed(1)}"/>
+      <path class="${areaClass}" d="${areaD}"/>
+      <path class="${lineClass}" d="${pathD}"/>
+      <text class="equity-label" x="${PAD + 2}" y="${PAD + 10}">+${fmtUSD(maxV)}</text>
+      <text class="equity-label" x="${PAD + 2}" y="${H - PAD - 2}">${fmtUSD(minV)}</text>
+      <text class="equity-label" x="${W - PAD - 2}" y="${H - PAD - 2}" text-anchor="end">${points.length} fills</text>
+    `;
+  } catch(e) { console.warn('loadEquityCurve:', e); }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1373,6 +1518,18 @@ async function saveBranding() {
 
   <!-- ─── P&L ──────────────────────────────────────────── -->
   <div id="tab-pnl" class="content" style="display:none">
+    <!-- Equity curve card -->
+    <div class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        Equity Curve
+        <span id="equity-total-label" style="font-size:13px;color:var(--green)"></span>
+      </div>
+      <div class="equity-chart-wrap" id="equity-chart-wrap">
+        <div class="empty-state" id="equity-empty">No fills data yet — run in paper mode to see the curve</div>
+        <svg id="equity-svg" style="display:none" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+
     <div class="section-grid">
       <div class="card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
@@ -1505,6 +1662,8 @@ async function saveBranding() {
       <span class="save-msg" id="brand-save-msg" style="margin-left:12px">Saved</span>
     </div>
   </div>
+
+</div><!-- #app -->
 
 </body>
 </html>

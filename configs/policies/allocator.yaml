@@ -19,6 +19,13 @@ min_quality_for_arb: MED
 min_quality_for_funding: MED
 min_quality_for_liquidity: HIGH
 
+# Fractional Kelly position sizing.
+# 0     = disabled (full notional up to cap — NOT recommended for live trading)
+# 0.25  = quarter-Kelly: conservative, recommended for paper-to-live graduation
+# 0.5   = half-Kelly: moderate, for established strategies with proven edge
+# See: https://en.wikipedia.org/wiki/Kelly_criterion
+kelly_fraction: 0.25
+
 redis:
   addr: "localhost:6379"
   password: ""

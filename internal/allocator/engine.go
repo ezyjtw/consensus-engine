@@ -106,6 +106,24 @@ func (e *Engine) Evaluate(intent arb.TradeIntent, systemMode, consensusQuality s
 		return e.reject(intent, "insufficient_available_notional")
 	}
 
+	// Gate 6: fractional Kelly position sizing (optional).
+	// When KellyFraction > 0, the intent is additionally scaled by the Kelly fraction.
+	// This prevents over-betting on any single signal and is the recommended setting
+	// for institutional deployments (0.25 = quarter-Kelly).
+	//
+	// For arb strategies the Kelly fraction acts as a simple risk-adjusted size limit:
+	//   kelly_size = kelly_fraction × available_notional
+	// A future improvement can weight by edge_bps / historical_edge_variance.
+	if e.policy.KellyFraction > 0 && e.policy.KellyFraction < 1.0 {
+		scaleFactor *= e.policy.KellyFraction
+		log.Printf("allocator: kelly fraction=%.2f applied to strategy=%s symbol=%s",
+			e.policy.KellyFraction, intent.Strategy, intent.Symbol)
+	}
+
+	if scaleFactor < 0.05 {
+		return e.reject(intent, "kelly_scaled_notional_too_small")
+	}
+
 	// Apply scale factor to all legs.
 	adjusted := intent
 	for i := range adjusted.Legs {

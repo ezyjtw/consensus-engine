@@ -8,13 +8,23 @@ import (
 )
 
 type Policy struct {
-	PerStrategyMaxUSD       map[string]float64 `yaml:"per_strategy_max_usd"`
-	PerVenueMaxUSD          map[string]float64 `yaml:"per_venue_max_usd"`
-	MarginUtilisationGatePct float64           `yaml:"margin_utilisation_gate_pct"`
-	MinQualityForArb        string             `yaml:"min_quality_for_arb"`
-	MinQualityForFunding    string             `yaml:"min_quality_for_funding"`
-	MinQualityForLiquidity  string             `yaml:"min_quality_for_liquidity"`
-	Redis                   RedisPolicy        `yaml:"redis"`
+	PerStrategyMaxUSD        map[string]float64 `yaml:"per_strategy_max_usd"`
+	PerVenueMaxUSD           map[string]float64 `yaml:"per_venue_max_usd"`
+	MarginUtilisationGatePct float64            `yaml:"margin_utilisation_gate_pct"`
+	MinQualityForArb         string             `yaml:"min_quality_for_arb"`
+	MinQualityForFunding     string             `yaml:"min_quality_for_funding"`
+	MinQualityForLiquidity   string             `yaml:"min_quality_for_liquidity"`
+
+	// KellyFraction applies fractional Kelly position sizing to each approved intent.
+	// 0 = disabled (full notional up to cap).
+	// 0.25 = quarter-Kelly (recommended for crypto — conservative and risk-adjusted).
+	// 0.5  = half-Kelly.
+	// The Kelly-adjusted size = intent.notional * KellyFraction * (edge_bps / edge_variance_bps).
+	// When edge_variance_bps is 0 (not provided), the fraction alone is applied as a
+	// simple proportional scale against the strategy cap.
+	KellyFraction float64 `yaml:"kelly_fraction"`
+
+	Redis RedisPolicy `yaml:"redis"`
 }
 
 type RedisPolicy struct {

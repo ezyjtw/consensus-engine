@@ -47,6 +47,9 @@ func (s *Server) routes() {
 	// The index page is public so the login screen can be served.
 	s.mux.HandleFunc("GET /", s.handleIndex)
 
+	// Prometheus-compatible metrics scrape endpoint — public, no auth required.
+	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
+
 	// Everything else requires a valid auth token.
 	s.mux.HandleFunc("GET /api/events", s.auth(s.sse.ServeHTTP))
 
