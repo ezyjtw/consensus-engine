@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/yourorg/arbsuite/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
 
 const epsilon = 1e-9

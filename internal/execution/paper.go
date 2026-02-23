@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourorg/arbsuite/internal/arb"
-	"github.com/yourorg/arbsuite/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/arb"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
 
 // posEntry is the value stored in PaperExecutor.positions.

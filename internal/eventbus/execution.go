@@ -7,9 +7,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/yourorg/arbsuite/internal/arb"
-	"github.com/yourorg/arbsuite/internal/consensus"
-	"github.com/yourorg/arbsuite/internal/execution"
+	"github.com/ezyjtw/consensus-engine/internal/arb"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/execution"
 )
 
 // ExecutionBusConfig configures the execution router's stream I/O.

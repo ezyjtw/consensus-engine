@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yourorg/arbsuite/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
 
 // spec §10 test 3: stale feed excluded from live quotes

@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/yourorg/arbsuite/internal/arb"
+	"github.com/ezyjtw/consensus-engine/internal/arb"
 )
 
 // AllocatorBusConfig configures the capital allocator's stream I/O.

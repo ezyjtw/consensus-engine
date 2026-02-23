@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/yourorg/arbsuite/internal/arb"
+	"github.com/ezyjtw/consensus-engine/internal/arb"
 )
 
 // Outcome records the allocator's decision on an intent.

@@ -1,6 +1,6 @@
 package execution
 
-import "github.com/yourorg/arbsuite/internal/arb"
+import "github.com/ezyjtw/consensus-engine/internal/arb"
 
 // ExecutionEvent is emitted for every order lifecycle transition.
 type ExecutionEvent struct {

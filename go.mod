@@ -1,4 +1,4 @@
-module github.com/yourorg/arbsuite
+module github.com/ezyjtw/consensus-engine
 
 go 1.24.0
 

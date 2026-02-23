@@ -9,7 +9,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/yourorg/arbsuite/internal/marketdata"
+	"github.com/ezyjtw/consensus-engine/internal/marketdata"
 )
 
 func main() {

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourorg/arbsuite/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
 
 // quoteState is a mutex-guarded partial Quote that each adapter builds up

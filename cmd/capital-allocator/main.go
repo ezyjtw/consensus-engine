@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yourorg/arbsuite/internal/allocator"
-	"github.com/yourorg/arbsuite/internal/eventbus"
+	"github.com/ezyjtw/consensus-engine/internal/allocator"
+	"github.com/ezyjtw/consensus-engine/internal/eventbus"
 )
 
 func main() {
