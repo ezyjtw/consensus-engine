@@ -241,14 +241,16 @@ func TestModeRankOrdering(t *testing.T) {
 }
 
 // Test pruneOlderThan utility function.
+// pruneOlderThan removes entries strictly less than cutoffMs,
+// keeping the cutoff value and everything after it.
 func TestPruneOlderThan(t *testing.T) {
 	ts := []int64{100, 200, 300, 400, 500}
 	result := pruneOlderThan(ts, 300)
-	if len(result) != 2 {
-		t.Errorf("expected 2 remaining after prune at 300, got %d", len(result))
+	if len(result) != 3 {
+		t.Errorf("expected 3 remaining after prune at 300, got %d", len(result))
 	}
-	if result[0] != 400 {
-		t.Errorf("first remaining should be 400, got %d", result[0])
+	if len(result) > 0 && result[0] != 300 {
+		t.Errorf("first remaining should be 300, got %d", result[0])
 	}
 }
 

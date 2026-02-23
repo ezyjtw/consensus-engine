@@ -102,6 +102,8 @@ func (a *DeribitAdapter) connect(ctx context.Context) error {
 		conn.Close()
 	}()
 
+	cw := newConnWriter(conn)
+
 	// Enable server-side heartbeats so disconnects are detected quickly.
 	setHeartbeat := deribitRequest{
 		Jsonrpc: "2.0",
@@ -109,7 +111,7 @@ func (a *DeribitAdapter) connect(ctx context.Context) error {
 		Method:  "public/set_heartbeat",
 		Params:  deribitHeartbeatParams{Interval: 30},
 	}
-	if err := conn.WriteJSON(setHeartbeat); err != nil {
+	if err := cw.WriteJSON(setHeartbeat); err != nil {
 		return fmt.Errorf("set_heartbeat: %w", err)
 	}
 
@@ -127,7 +129,7 @@ func (a *DeribitAdapter) connect(ctx context.Context) error {
 		Method:  "public/subscribe",
 		Params:  deribitSubscribeParams{Channels: channels},
 	}
-	if err := conn.WriteJSON(subReq); err != nil {
+	if err := cw.WriteJSON(subReq); err != nil {
 		return fmt.Errorf("subscribe: %w", err)
 	}
 
@@ -170,7 +172,7 @@ func (a *DeribitAdapter) connect(ctx context.Context) error {
 					Method:  "public/test",
 					Params:  map[string]interface{}{},
 				}
-				if err := conn.WriteJSON(resp); err != nil {
+				if err := cw.WriteJSON(resp); err != nil {
 					return fmt.Errorf("heartbeat response: %w", err)
 				}
 			}

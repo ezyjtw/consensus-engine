@@ -25,12 +25,17 @@ type WebhookPayload struct {
 // AlertWorker subscribes to Redis output streams and fires webhooks
 // based on the currently stored AlertConfig.
 type AlertWorker struct {
-	rdb   *redis.Client
-	store *Store
+	rdb        *redis.Client
+	store      *Store
+	httpClient *http.Client
 }
 
 func NewAlertWorker(rdb *redis.Client, store *Store) *AlertWorker {
-	return &AlertWorker{rdb: rdb, store: store}
+	return &AlertWorker{
+		rdb:        rdb,
+		store:      store,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 // Run starts the alert evaluation loop. Blocks until ctx is cancelled.
@@ -83,6 +88,9 @@ func (w *AlertWorker) Run(ctx context.Context) {
 		}
 
 		for _, stream := range results {
+			if len(stream.Messages) == 0 {
+				continue
+			}
 			lastIDs[stream.Stream] = stream.Messages[len(stream.Messages)-1].ID
 			for _, msg := range stream.Messages {
 				raw, ok := msg.Values["data"].(string)
@@ -183,8 +191,7 @@ func (w *AlertWorker) fire(ctx context.Context, url string, p WebhookPayload) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "consensus-engine-dashboard/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := w.httpClient.Do(req)
 	if err != nil {
 		log.Printf("webhook: delivery failed: %v", err)
 		return
@@ -213,8 +220,7 @@ func (w *AlertWorker) TestWebhook(ctx context.Context, webhookURL string) error 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "consensus-engine-dashboard/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := w.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("webhook request failed: %w", err)
 	}

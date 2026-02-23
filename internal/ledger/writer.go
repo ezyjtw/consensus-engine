@@ -46,8 +46,11 @@ func (db *DB) Close() {
 
 // WriteIntent persists an approved intent to trade_intents.
 func (db *DB) WriteIntent(ctx context.Context, intent arb.TradeIntent) error {
-	payload, _ := json.Marshal(intent)
-	_, err := db.pool.Exec(ctx,
+	payload, err := json.Marshal(intent)
+	if err != nil {
+		return fmt.Errorf("marshal intent: %w", err)
+	}
+	_, err = db.pool.Exec(ctx,
 		`INSERT INTO trade_intents (id, tenant_id, strategy, symbol, payload, ts)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 ON CONFLICT (id) DO NOTHING`,
@@ -79,8 +82,11 @@ func (db *DB) WriteFill(ctx context.Context, fill *execution.SimulatedFill) erro
 
 // WriteExecutionEvent persists an execution event as an order record.
 func (db *DB) WriteExecutionEvent(ctx context.Context, ev execution.ExecutionEvent) error {
-	payload, _ := json.Marshal(ev)
-	_, err := db.pool.Exec(ctx,
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		return fmt.Errorf("marshal execution event: %w", err)
+	}
+	_, err = db.pool.Exec(ctx,
 		`INSERT INTO orders
 		 (id, intent_id, venue, symbol, action, status, payload, ts)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -92,8 +98,11 @@ func (db *DB) WriteExecutionEvent(ctx context.Context, ev execution.ExecutionEve
 
 // WriteRiskState persists a risk state snapshot.
 func (db *DB) WriteRiskState(ctx context.Context, state risk.State) error {
-	payload, _ := json.Marshal(state)
-	_, err := db.pool.Exec(ctx,
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal risk state: %w", err)
+	}
+	_, err = db.pool.Exec(ctx,
 		`INSERT INTO risk_state_snapshots (tenant_id, mode, metrics, ts)
 		 VALUES ($1, $2, $3, $4)`,
 		state.TenantID, string(state.Mode), string(payload),
@@ -104,20 +113,26 @@ func (db *DB) WriteRiskState(ctx context.Context, state risk.State) error {
 
 // WriteAlert persists a risk alert.
 func (db *DB) WriteAlert(ctx context.Context, alert risk.Alert) error {
-	payload, _ := json.Marshal(alert)
-	_, err := db.pool.Exec(ctx,
+	payload, err := json.Marshal(alert)
+	if err != nil {
+		return fmt.Errorf("marshal alert: %w", err)
+	}
+	_, execErr := db.pool.Exec(ctx,
 		`INSERT INTO alerts (tenant_id, source, severity, message, payload, ts)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		alert.TenantID, alert.Source, alert.Severity, alert.Message,
 		string(payload), time.UnixMilli(alert.TsMs).UTC(),
 	)
-	return err
+	return execErr
 }
 
 // AuditLog appends an immutable audit entry.
 func (db *DB) AuditLog(ctx context.Context, tenantID, actor, action string, payload interface{}) error {
-	data, _ := json.Marshal(payload)
-	_, err := db.pool.Exec(ctx,
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal audit payload: %w", err)
+	}
+	_, err = db.pool.Exec(ctx,
 		`INSERT INTO audit_log (tenant_id, actor, action, payload)
 		 VALUES ($1, $2, $3, $4)`,
 		tenantID, actor, action, string(data),

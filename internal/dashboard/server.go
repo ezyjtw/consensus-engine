@@ -122,10 +122,6 @@ func (s *Server) resolveKey(r *http.Request) *auth.APIKey {
 		}
 	}
 
-	// Allow legacy token even without DB.
-	if s.authToken != "" && token == s.authToken {
-		return &auth.APIKey{Role: auth.RoleAdmin, TenantID: "default", Name: "legacy"}
-	}
 	return nil
 }
 

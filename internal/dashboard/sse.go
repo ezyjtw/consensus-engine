@@ -105,6 +105,9 @@ func (h *StreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, stream := range results {
+			if len(stream.Messages) == 0 {
+				continue
+			}
 			lastIDs[stream.Stream] = stream.Messages[len(stream.Messages)-1].ID
 			evType := streamEventType(stream.Stream)
 			for _, msg := range stream.Messages {

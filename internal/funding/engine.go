@@ -89,8 +89,8 @@ func (e *Engine) Regime(venue, symbol string) *Regime {
 
 // Evaluate checks all configured strategies and returns any qualifying intents.
 func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
 	now := time.Now().UnixMilli()
 	var intents []arb.TradeIntent
