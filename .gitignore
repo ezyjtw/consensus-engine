@@ -10,3 +10,16 @@ go.work.sum
 vendor/
 bin/
 .env
+
+# compiled binaries in repo root
+/consensus-engine
+/dashboard
+/liquidity-engine
+/arb-opportunity-engine
+/capital-allocator
+/execution-router
+/funding-engine
+/ledger
+/market-data
+/paper-trader
+/risk-daemon
