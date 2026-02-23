@@ -1,0 +1,31 @@
+per_strategy_max_usd:
+  CROSS_VENUE_ARB: 100000
+  FUNDING_CARRY: 200000
+  FUNDING_DIFFERENTIAL: 150000
+  SPREAD_CAPTURE: 50000
+  LIQUIDATION_CONTRA: 25000
+
+per_venue_max_usd:
+  binance: 200000
+  okx: 150000
+  bybit: 150000
+  deribit: 100000
+
+# Gate all new intents when margin utilisation exceeds this on any venue.
+margin_utilisation_gate_pct: 75.0
+
+# Consensus quality gates by strategy family.
+min_quality_for_arb: MED
+min_quality_for_funding: MED
+min_quality_for_liquidity: HIGH
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  use_tls: false
+  input_stream: "trade:intents"
+  output_stream: "trade:intents:approved"
+  consumer_group: "capital-allocator"
+  consumer_name: "worker-1"
+  block_ms: 1000
+  batch_size: 50

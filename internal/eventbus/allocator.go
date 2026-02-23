@@ -1,0 +1,94 @@
+package eventbus
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/yourorg/arbsuite/internal/arb"
+)
+
+// AllocatorBusConfig configures the capital allocator's stream I/O.
+type AllocatorBusConfig struct {
+	Addr          string
+	Password      string
+	UseTLS        bool
+	InputStream   string // trade:intents
+	OutputStream  string // trade:intents:approved
+	ConsumerGroup string
+	ConsumerName  string
+	BlockMs       time.Duration
+	BatchSize     int64
+}
+
+// AllocatorBus handles Redis stream I/O for the capital allocator.
+type AllocatorBus struct {
+	sc  *StreamClient
+	cfg AllocatorBusConfig
+}
+
+// NewAllocatorBus creates the bus and ensures the consumer group exists.
+func NewAllocatorBus(cfg AllocatorBusConfig) (*AllocatorBus, error) {
+	sc, err := NewStreamClient(cfg.Addr, cfg.Password, cfg.UseTLS)
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	if err := sc.EnsureConsumerGroup(ctx, cfg.InputStream, cfg.ConsumerGroup); err != nil {
+		_ = sc.Close()
+		return nil, fmt.Errorf("allocator bus: %w", err)
+	}
+	return &AllocatorBus{sc: sc, cfg: cfg}, nil
+}
+
+// ReadIntents reads a batch of raw trade intents from the input stream.
+func (b *AllocatorBus) ReadIntents(ctx context.Context) ([]arb.TradeIntent, error) {
+	msgs, err := b.sc.ReadMessages(ctx,
+		b.cfg.InputStream, b.cfg.ConsumerGroup, b.cfg.ConsumerName,
+		b.cfg.BatchSize, b.cfg.BlockMs)
+	if err != nil {
+		return nil, err
+	}
+	var intents []arb.TradeIntent
+	for _, m := range msgs {
+		raw, ok := m.Values["data"].(string)
+		if !ok {
+			continue
+		}
+		var intent arb.TradeIntent
+		if err := json.Unmarshal([]byte(raw), &intent); err != nil {
+			log.Printf("allocator bus: unmarshal intent: %v", err)
+			continue
+		}
+		intents = append(intents, intent)
+		_ = b.sc.Ack(ctx, b.cfg.InputStream, b.cfg.ConsumerGroup, m.ID)
+	}
+	return intents, nil
+}
+
+// PublishApproved appends an approved intent to the output stream.
+func (b *AllocatorBus) PublishApproved(ctx context.Context, intent arb.TradeIntent) error {
+	return b.sc.Publish(ctx, b.cfg.OutputStream, intent)
+}
+
+// SystemMode returns the current system operating mode from Redis.
+// Returns "RUNNING" if the key is absent (safe default).
+func (b *AllocatorBus) SystemMode(ctx context.Context) string {
+	mode := b.sc.GetString(ctx, "risk:mode")
+	if mode == "" {
+		return "RUNNING"
+	}
+	return mode
+}
+
+// KillSwitchActive returns true when the kill switch is engaged.
+func (b *AllocatorBus) KillSwitchActive(ctx context.Context) bool {
+	return b.sc.KillSwitchActive(ctx)
+}
+
+// Close releases the Redis connection.
+func (b *AllocatorBus) Close() error {
+	return b.sc.Close()
+}

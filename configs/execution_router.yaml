@@ -1,0 +1,20 @@
+# TRADING_MODE env var overrides this: PAPER | LIVE
+trading_mode: PAPER
+
+# Paper mode fill simulation parameters.
+sim_slippage_bps: 4.0
+sim_latency_ms: 50
+adverse_selection_bps: 10.0
+
+tenant_id: "default"
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  use_tls: false
+  input_stream: "trade:intents:approved"
+  output_events: "execution:events"
+  consumer_group: "execution-router"
+  consumer_name: "worker-1"
+  block_ms: 1000
+  batch_size: 20

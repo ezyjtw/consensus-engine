@@ -1,0 +1,53 @@
+symbols:
+  - BTC-PERP
+  - ETH-PERP
+
+# Minimum annualised funding yield to enter (net of fees).
+min_annual_yield_pct:
+  HIGH: 8.0
+  MED: 12.0
+
+# Maximum position notional per funding intent.
+max_notional_usd: 50000
+
+# Minimum funding rate differential between venues (bps per 8h) to trigger
+# the FUNDING_DIFFERENTIAL strategy.
+min_differential_bps_per_8h: 5.0
+
+# Unwind / rebalance when hedge has drifted beyond this notional.
+hedge_drift_unwind_usd: 500
+
+# Reduce position size when 24h realised vol exceeds threshold.
+volatility_gate:
+  vol_threshold_pct: 5.0
+  size_reduction_factor: 0.5
+
+# Venues eligible for funding strategies.
+venues:
+  - binance
+  - okx
+  - bybit
+  - deribit
+
+# How often to evaluate and potentially emit funding intents.
+eval_interval_s: 30
+
+# How long an emitted funding intent is valid.
+intent_ttl_ms: 10000
+
+# Max per-leg slippage allowed in the execution router.
+max_slippage_bps: 8.0
+
+# Minimum gap between intents for the same symbol+venue to avoid spam.
+cooldown_s: 300
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  use_tls: false
+  input_stream: "market:quotes"
+  output_intents: "trade:intents"
+  consumer_group: "funding-engine"
+  consumer_name: "worker-1"
+  block_ms: 500
+  batch_size: 200
