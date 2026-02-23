@@ -960,30 +960,45 @@ async function setMode(mode) {
 // ═══════════════════════════════════════════════════════
 async function loadPnL() {
   try {
-    const r = await fetch('/api/pnl', { headers: authHeaders() });
-    if (!r.ok) return;
-    const data = await r.json();
+    const [pnlResp, kpiResp] = await Promise.all([
+      fetch('/api/pnl', { headers: authHeaders() }),
+      fetch('/api/metrics/kpi', { headers: authHeaders() }),
+    ]);
+    if (!pnlResp.ok) return;
+    const data = await pnlResp.json();
     const rows = data.by_strategy || data || [];
     const tbody = document.getElementById('pnl-tbody');
     if (!Array.isArray(rows) || !rows.length) {
       tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No fills yet.</td></tr>';
       document.getElementById('pnl-total').textContent = '$0.00';
-      return;
+    } else {
+      let totalPnL = 0, totalFees = 0, totalFills = 0;
+      tbody.innerHTML = rows.map(r => {
+        const pnl = parseFloat(r.total_pnl) || 0;
+        const fees = parseFloat(r.total_fees) || 0;
+        const fills = parseInt(r.fill_count) || 0;
+        totalPnL += pnl; totalFees += fees; totalFills += fills;
+        const col = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+        return `<tr><td>${escHtml(r.strategy||'')}</td><td style="color:${col}">${fmtUSD(pnl)}</td><td>${fills}</td><td style="color:var(--red)">${fmtUSD(fees)}</td></tr>`;
+      }).join('');
+      const totCol = totalPnL >= 0 ? 'var(--green)' : 'var(--red)';
+      document.getElementById('pnl-total').style.color = totCol;
+      document.getElementById('pnl-total').textContent = fmtUSD(totalPnL);
+      document.getElementById('pnl-fees').textContent = fmtUSD(totalFees);
+      document.getElementById('pnl-fills').textContent = totalFills;
     }
-    let totalPnL = 0, totalFees = 0, totalFills = 0;
-    tbody.innerHTML = rows.map(r => {
-      const pnl = parseFloat(r.total_pnl) || 0;
-      const fees = parseFloat(r.total_fees) || 0;
-      const fills = parseInt(r.fill_count) || 0;
-      totalPnL += pnl; totalFees += fees; totalFills += fills;
-      const col = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-      return `<tr><td>${escHtml(r.strategy||'')}</td><td style="color:${col}">${fmtUSD(pnl)}</td><td>${fills}</td><td style="color:var(--red)">${fmtUSD(fees)}</td></tr>`;
-    }).join('');
-    const totCol = totalPnL >= 0 ? 'var(--green)' : 'var(--red)';
-    document.getElementById('pnl-total').style.color = totCol;
-    document.getElementById('pnl-total').textContent = fmtUSD(totalPnL);
-    document.getElementById('pnl-fees').textContent = fmtUSD(totalFees);
-    document.getElementById('pnl-fills').textContent = totalFills;
+    // KPI metrics
+    if (kpiResp.ok) {
+      const kpi = await kpiResp.json();
+      const sharpe = parseFloat(kpi.sharpe_proxy) || 0;
+      const winRate = parseFloat(kpi.win_rate_pct) || 0;
+      const slippage = parseFloat(kpi.avg_slippage_bps) || 0;
+      const sharpeCol = sharpe >= 1 ? 'var(--green)' : sharpe >= 0 ? 'var(--yellow)' : 'var(--red)';
+      document.getElementById('kpi-sharpe').style.color = sharpeCol;
+      document.getElementById('kpi-sharpe').textContent = sharpe.toFixed(2);
+      document.getElementById('kpi-win-rate').textContent = winRate.toFixed(1) + '%';
+      document.getElementById('kpi-slippage').textContent = slippage.toFixed(2) + ' bps';
+    }
   } catch(e) { console.warn('loadPnL:', e); }
 }
 
@@ -1139,6 +1154,9 @@ function fmtUSD(v) {
           <div class="metric"><div class="metric-label">TOTAL PNL</div><div class="metric-val" id="pnl-total">—</div></div>
           <div class="metric"><div class="metric-label">TOTAL FEES</div><div class="metric-val" id="pnl-fees">—</div></div>
           <div class="metric"><div class="metric-label">FILL COUNT</div><div class="metric-val" id="pnl-fills">—</div></div>
+          <div class="metric"><div class="metric-label">SHARPE PROXY</div><div class="metric-val" id="kpi-sharpe">—</div></div>
+          <div class="metric"><div class="metric-label">WIN RATE</div><div class="metric-val" id="kpi-win-rate">—</div></div>
+          <div class="metric"><div class="metric-label">AVG SLIPPAGE</div><div class="metric-val" id="kpi-slippage">—</div></div>
         </div>
       </div>
     </div>

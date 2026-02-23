@@ -37,6 +37,7 @@ func main() {
 		UseTLS:        policy.Redis.UseTLS,
 		InputStream:   policy.Redis.InputStream,
 		OutputStream:  policy.Redis.OutputStream,
+		FillsStream:   policy.Redis.FillsStream,
 		ConsumerGroup: policy.Redis.ConsumerGroup,
 		ConsumerName:  policy.Redis.ConsumerName,
 		BlockMs:       time.Duration(policy.Redis.BlockMs) * time.Millisecond,
@@ -72,6 +73,30 @@ func main() {
 			continue
 		}
 
+		// ── Release notional for completed fills ──────────────────────────
+		// This MUST run before evaluating new intents so caps are up-to-date.
+		fills, err := bus.ReadFills(ctx)
+		if err != nil {
+			log.Printf("capital-allocator: read fills error: %v", err)
+		}
+		for _, f := range fills {
+			if f.IntentExpired {
+				continue // expired intents never deployed capital
+			}
+			// Release the notional across all legs using the primary venue.
+			// For two-leg arb both legs are counted, so release full fill notional.
+			totalNotional := 0.0
+			for _, leg := range f.Legs {
+				totalNotional += leg.FilledNotionalUSD
+				engine.ReleaseNotional(f.Strategy, leg.Venue, leg.FilledNotionalUSD)
+			}
+			if totalNotional > 0 {
+				log.Printf("capital-allocator: released %.2f USD notional for strategy=%s",
+					totalNotional, f.Strategy)
+			}
+		}
+
+		// ── Evaluate new intents ──────────────────────────────────────────
 		intents, err := bus.ReadIntents(ctx)
 		if err != nil {
 			log.Printf("capital-allocator: read error: %v", err)
@@ -80,11 +105,8 @@ func main() {
 		}
 
 		mode := bus.SystemMode(ctx)
-		// Note: consensus quality is embedded in the intent constraints.
-		// For V1, we use the quality stored in Constraints.MinQuality as a proxy
-		// for the current consensus quality (the strategy engine already validated it).
 		for _, intent := range intents {
-			quality := intent.Constraints.MinQuality // proxy for current quality
+			quality := intent.Constraints.MinQuality
 			outcome := engine.Evaluate(intent, mode, quality)
 			if !outcome.Approved {
 				continue

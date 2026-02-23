@@ -136,6 +136,127 @@ func (b *RiskBus) KillSwitchActive(ctx context.Context) bool {
 	return b.sc.KillSwitchActive(ctx)
 }
 
+// FlattenOpenPositions reads all paper positions from Redis (paper:pos:{tenant}:*)
+// and publishes a close intent for each non-zero position to the intents stream.
+// Returns the number of close intents published.
+func (b *RiskBus) FlattenOpenPositions(ctx context.Context, tenantID, intentsStream string) (int, error) {
+	pattern := "paper:pos:" + tenantID + ":*"
+	keys, err := b.sc.Keys(ctx, pattern)
+	if err != nil {
+		return 0, fmt.Errorf("flatten: scan positions: %w", err)
+	}
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	vals, err := b.sc.MGet(ctx, keys...)
+	if err != nil {
+		return 0, fmt.Errorf("flatten: mget positions: %w", err)
+	}
+
+	count := 0
+	now := time.Now().UnixMilli()
+	for i, v := range vals {
+		if v == nil {
+			continue
+		}
+		var pos map[string]interface{}
+		raw, _ := v.(string)
+		if err := json.Unmarshal([]byte(raw), &pos); err != nil {
+			continue
+		}
+		notional, _ := pos["notional"].(float64)
+		if notional == 0 {
+			continue
+		}
+		// key format: paper:pos:{tenant}:{venue}:{symbol}:{market}
+		parts := splitKey(keys[i], 3) // drop "paper:pos:{tenant}" prefix
+		if len(parts) < 3 {
+			continue
+		}
+		venue, symbol, market := parts[0], parts[1], parts[2]
+		action := "SELL"
+		if notional < 0 {
+			action = "BUY"
+			notional = -notional
+		}
+
+		closeIntent := map[string]interface{}{
+			"intent_id":  fmt.Sprintf("flatten-%d-%d", i, now),
+			"strategy":   "FLATTEN",
+			"symbol":     symbol,
+			"ts_ms":      now,
+			"expires_ms": now + 30000,
+			"source":     "risk_daemon",
+			"legs": []map[string]interface{}{{
+				"venue":            venue,
+				"action":           action,
+				"notional_usd":     notional,
+				"market":           market,
+				"max_slippage_bps": 200, // accept wide slippage to ensure fill
+			}},
+		}
+		if err := b.sc.Publish(ctx, intentsStream, closeIntent); err != nil {
+			log.Printf("flatten: publish close intent for %s/%s: %v", venue, symbol, err)
+			continue
+		}
+		count++
+		log.Printf("risk-daemon: FLATTEN close intent: venue=%s symbol=%s action=%s notional=%.2f",
+			venue, symbol, action, notional)
+	}
+	return count, nil
+}
+
+// OpenPositionCount returns the number of non-zero paper positions for a tenant.
+func (b *RiskBus) OpenPositionCount(ctx context.Context, tenantID string) int {
+	pattern := "paper:pos:" + tenantID + ":*"
+	keys, err := b.sc.Keys(ctx, pattern)
+	if err != nil || len(keys) == 0 {
+		return 0
+	}
+	vals, err := b.sc.MGet(ctx, keys...)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, v := range vals {
+		if v == nil {
+			continue
+		}
+		raw, _ := v.(string)
+		var pos map[string]interface{}
+		if err := json.Unmarshal([]byte(raw), &pos); err != nil {
+			continue
+		}
+		if n, _ := pos["notional"].(float64); n != 0 {
+			count++
+		}
+	}
+	return count
+}
+
+func splitKey(key string, skip int) []string {
+	var parts []string
+	cur := ""
+	skipped := 0
+	for _, c := range key {
+		if c == ':' {
+			if skipped < skip {
+				skipped++
+				cur = ""
+				continue
+			}
+			parts = append(parts, cur)
+			cur = ""
+		} else {
+			cur += string(c)
+		}
+	}
+	if cur != "" {
+		parts = append(parts, cur)
+	}
+	return parts
+}
+
 // Close releases the Redis connection.
 func (b *RiskBus) Close() error {
 	return b.sc.Close()

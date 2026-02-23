@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ezyjtw/consensus-engine/internal/arb"
+	"github.com/ezyjtw/consensus-engine/internal/execution"
 )
 
 // AllocatorBusConfig configures the capital allocator's stream I/O.
@@ -17,6 +18,7 @@ type AllocatorBusConfig struct {
 	UseTLS        bool
 	InputStream   string // trade:intents
 	OutputStream  string // trade:intents:approved
+	FillsStream   string // demo:fills or live:fills — for notional release
 	ConsumerGroup string
 	ConsumerName  string
 	BlockMs       time.Duration
@@ -40,7 +42,39 @@ func NewAllocatorBus(cfg AllocatorBusConfig) (*AllocatorBus, error) {
 		_ = sc.Close()
 		return nil, fmt.Errorf("allocator bus: %w", err)
 	}
+	if cfg.FillsStream != "" {
+		if err := sc.EnsureConsumerGroup(ctx, cfg.FillsStream, cfg.ConsumerGroup); err != nil {
+			log.Printf("allocator bus: fills group on %q: %v (ok if stream not yet created)", cfg.FillsStream, err)
+		}
+	}
 	return &AllocatorBus{sc: sc, cfg: cfg}, nil
+}
+
+// ReadFills drains completed fill events so the engine can release deployed notional.
+func (b *AllocatorBus) ReadFills(ctx context.Context) ([]execution.SimulatedFill, error) {
+	if b.cfg.FillsStream == "" {
+		return nil, nil
+	}
+	msgs, err := b.sc.ReadMessages(ctx,
+		b.cfg.FillsStream, b.cfg.ConsumerGroup, b.cfg.ConsumerName,
+		b.cfg.BatchSize, 0)
+	if err != nil {
+		return nil, err
+	}
+	var fills []execution.SimulatedFill
+	for _, m := range msgs {
+		raw, ok := m.Values["data"].(string)
+		if !ok {
+			_ = b.sc.Ack(ctx, b.cfg.FillsStream, b.cfg.ConsumerGroup, m.ID)
+			continue
+		}
+		var f execution.SimulatedFill
+		if err := json.Unmarshal([]byte(raw), &f); err == nil {
+			fills = append(fills, f)
+		}
+		_ = b.sc.Ack(ctx, b.cfg.FillsStream, b.cfg.ConsumerGroup, m.ID)
+	}
+	return fills, nil
 }
 
 // ReadIntents reads a batch of raw trade intents from the input stream.

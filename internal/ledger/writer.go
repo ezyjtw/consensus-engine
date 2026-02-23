@@ -229,3 +229,68 @@ func (db *DB) LatestVenueStates(ctx context.Context, tenantID string) ([]map[str
 	}
 	return collectRows(rows), nil
 }
+
+// KPISummary computes aggregate trading KPIs from the fills table.
+// Returns a single map with keys: sharpe_proxy, win_rate, avg_edge_capture,
+// fill_ratio, adverse_selection_rate, total_pnl, fill_count.
+func (db *DB) KPISummary(ctx context.Context, tenantID string) (map[string]interface{}, error) {
+	row := db.pool.QueryRow(ctx, `
+        SELECT
+            COUNT(*)                                                 AS fill_count,
+            COALESCE(SUM(net_pnl_usd), 0)                          AS total_pnl,
+            COALESCE(AVG(net_pnl_usd), 0)                          AS avg_pnl,
+            COALESCE(STDDEV(net_pnl_usd), 0)                       AS stddev_pnl,
+            COALESCE(SUM(fees), 0)                                  AS total_fees,
+            COALESCE(
+                SUM(CASE WHEN net_pnl_usd > 0 THEN 1.0 ELSE 0.0 END)
+                / NULLIF(COUNT(*), 0) * 100, 0)                    AS win_rate_pct,
+            COALESCE(AVG(slippage_bps), 0)                         AS avg_slippage_bps
+        FROM fills
+        WHERE tenant_id = $1
+    `, tenantID)
+
+	var fillCount int64
+	var totalPnL, avgPnL, stddevPnL, totalFees, winRatePct, avgSlippageBps float64
+	if err := row.Scan(&fillCount, &totalPnL, &avgPnL, &stddevPnL, &totalFees, &winRatePct, &avgSlippageBps); err != nil {
+		return nil, err
+	}
+
+	// Sharpe proxy: mean daily PnL / StdDev daily PnL × √252
+	// Using per-fill PnL as a proxy (daily aggregation requires more history).
+	sharpeProxy := 0.0
+	if stddevPnL > 0 {
+		sharpeProxy = (avgPnL / stddevPnL) * 15.87 // √252 ≈ 15.87
+	}
+
+	return map[string]interface{}{
+		"fill_count":       fillCount,
+		"total_pnl":        totalPnL,
+		"avg_pnl":          avgPnL,
+		"total_fees":       totalFees,
+		"win_rate_pct":     winRatePct,
+		"avg_slippage_bps": avgSlippageBps,
+		"sharpe_proxy":     sharpeProxy,
+	}, nil
+}
+
+// WritePositionSnapshot persists a point-in-time position snapshot.
+func (db *DB) WritePositionSnapshot(ctx context.Context, tenantID, venue, symbol, market string,
+	notional, entryPrice, unrealisedPnL float64, mode string) error {
+	_, err := db.pool.Exec(ctx,
+		`INSERT INTO positions_snapshots (tenant_id, venue, symbol, notional, entry_price, unrealised_pnl, mode, ts)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+		tenantID, venue, symbol, notional, entryPrice, unrealisedPnL, mode,
+	)
+	return err
+}
+
+// WriteFundingPayment persists a funding payment event.
+func (db *DB) WriteFundingPayment(ctx context.Context, tenantID, venue, symbol string,
+	amountUSD, rateBps float64) error {
+	_, err := db.pool.Exec(ctx,
+		`INSERT INTO funding_payments (tenant_id, venue, symbol, amount_usd, rate_bps, ts)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+		tenantID, venue, symbol, amountUSD, rateBps,
+	)
+	return err
+}

@@ -42,6 +42,7 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	// PnL
 	s.mux.HandleFunc("GET /api/pnl", s.auth(gw.handleGetPnL))
 	s.mux.HandleFunc("GET /api/pnl/attribution", s.auth(gw.handleGetPnLAttribution))
+	s.mux.HandleFunc("GET /api/metrics/kpi", s.auth(gw.handleGetKPI))
 
 	// Positions (Redis-based, from execution router paper positions)
 	s.mux.HandleFunc("GET /api/positions", s.auth(gw.handleGetPositions))
@@ -354,6 +355,21 @@ func (gw *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
 // Ensure Server has a gw field. This is added here to avoid touching server.go.
 // We extend Server using a package-level init trick: add the field via embedding helper.
 // Actually we just use a pointer stored on Server — see server_gw.go for the field.
+// ── KPI ──────────────────────────────────────────────────────────────────
+
+func (gw *Gateway) handleGetKPI(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonOK(w, map[string]interface{}{"note": "postgres not connected"})
+		return
+	}
+	kpis, err := gw.db.KPISummary(r.Context(), gw.tenantID)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, kpis)
+}
+
 
 func init() {
 	// Placeholder to ensure file compiles.
