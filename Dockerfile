@@ -3,11 +3,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /dashboard ./cmd/dashboard
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /dashboard ./cmd/dashboard
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-COPY --from=builder /dashboard .
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /dashboard /dashboard
 EXPOSE 8080
-CMD ["./dashboard"]
+ENTRYPOINT ["/dashboard"]

@@ -3,11 +3,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /liquidity-engine ./cmd/liquidity-engine
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /liquidity-engine ./cmd/liquidity-engine
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates tzdata
-WORKDIR /app
-COPY --from=builder /liquidity-engine .
-COPY configs/ configs/
-CMD ["./liquidity-engine"]
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /liquidity-engine /liquidity-engine
+COPY configs/ /configs/
+ENTRYPOINT ["/liquidity-engine"]

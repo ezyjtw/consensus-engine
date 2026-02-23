@@ -3,12 +3,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /execution-router ./cmd/execution-router
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /execution-router ./cmd/execution-router
 
-FROM alpine:3.19
-RUN apk --no-cache add ca-certificates tzdata
-WORKDIR /app
-COPY --from=builder /execution-router /app/execution-router
-COPY configs/ /app/configs/
-ENV REDIS_ADDR="redis:6379"
-ENTRYPOINT ["/app/execution-router"]
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /execution-router /execution-router
+COPY configs/ /configs/
+ENTRYPOINT ["/execution-router"]
