@@ -13,6 +13,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/yourorg/arbsuite/internal/dashboard"
+	"github.com/yourorg/arbsuite/internal/ledger"
 )
 
 func main() {
@@ -32,6 +33,11 @@ func main() {
 		port = "8080"
 	}
 
+	tenantID := os.Getenv("TENANT_ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	rdbOpts, err := buildRedisOpts()
 	if err != nil {
 		log.Fatalf("redis config: %v", err)
@@ -48,6 +54,25 @@ func main() {
 	sse := dashboard.NewStreamHandler(rdb, store)
 	alerts := dashboard.NewAlertWorker(rdb, store)
 	srv := dashboard.NewServer(store, sse, alerts, authToken)
+
+	// Optionally connect to Postgres for the Gateway API historical endpoints.
+	var ldb *ledger.DB
+	if pgDSN := os.Getenv("POSTGRES_DSN"); pgDSN != "" {
+		ctx := context.Background()
+		ldb, err = ledger.Connect(ctx, pgDSN)
+		if err != nil {
+			log.Printf("WARNING: postgres connect failed (%v) — history endpoints will return empty", err)
+			ldb = nil
+		} else {
+			log.Println("postgres connected — Gateway API historical endpoints enabled")
+		}
+	} else {
+		log.Println("POSTGRES_DSN not set — Gateway API will use Redis-only data")
+	}
+
+	// Wire the Gateway API routes onto the dashboard server.
+	gw := dashboard.NewGateway(rdb, ldb, tenantID)
+	srv.RegisterGateway(gw)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -69,6 +94,10 @@ func main() {
 	<-ctx.Done()
 	log.Println("dashboard shutting down…")
 	httpSrv.Shutdown(context.Background()) //nolint:errcheck
+
+	if ldb != nil {
+		ldb.Close()
+	}
 }
 
 func buildRedisOpts() (*redis.Options, error) {
