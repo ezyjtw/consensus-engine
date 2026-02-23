@@ -1,0 +1,26 @@
+# L2 transfer routing configuration (V3 optional feature)
+# When enabled, the transfer service will prefer L2 networks over L1 for eligible
+# collateral moves, reducing gas costs significantly.
+
+enabled: false                    # set true to activate L2 routing
+
+prefer_network: "arbitrum"        # arbitrum / optimism / base — evaluated first
+
+max_gas_gwei: 50.0                # refuse to bridge if gas price exceeds this
+min_savings_usd: 5.0              # only use L2 if it saves at least this vs L1
+
+networks:
+  arbitrum:
+    rpc_url: ""                   # e.g. https://arb1.arbitrum.io/rpc
+    bridge_contract: "0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a"  # Arbitrum Inbox
+    explorer_url: "https://arbiscan.io"
+
+  optimism:
+    rpc_url: ""                   # e.g. https://mainnet.optimism.io
+    bridge_contract: "0x25ace71c97B33Cc4729CF772ae268934F7ab5fA1"  # Optimism L1 CrossDomainMessenger
+    explorer_url: "https://optimistic.etherscan.io"
+
+  base:
+    rpc_url: ""                   # e.g. https://mainnet.base.org
+    bridge_contract: "0x3154Cf16ccdb4C6d922629664174b904d80F2C35"  # Base L1 StandardBridge
+    explorer_url: "https://basescan.org"

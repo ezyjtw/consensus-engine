@@ -1,17 +1,19 @@
 package dashboard
 
 import (
+	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/ezyjtw/consensus-engine/internal/auth"
 	"github.com/ezyjtw/consensus-engine/internal/ledger"
 )
 
-// Gateway extends the dashboard with the full V1 REST API surface.
-// It holds a Redis client (shared with the Store) and an optional ledger DB.
+// Gateway extends the dashboard with the full V1/V3 REST API surface.
 type Gateway struct {
 	rdb      *redis.Client
 	db       *ledger.DB // nil if Postgres not configured
@@ -25,16 +27,17 @@ func NewGateway(rdb *redis.Client, db *ledger.DB, tenantID string) *Gateway {
 	return &Gateway{rdb: rdb, db: db, tenantID: tenantID}
 }
 
-// RegisterRoutes attaches all gateway endpoints to the server mux.
+// RegisterGateway attaches all gateway endpoints to the server mux and wires the DB.
 func (s *Server) RegisterGateway(gw *Gateway) {
 	s.gw = gw
+	s.SetDB(gw.db)
 
 	// Risk / mode
 	s.mux.HandleFunc("GET /api/mode", s.auth(gw.handleGetMode))
-	s.mux.HandleFunc("POST /api/mode/pause", s.auth(gw.handleSetMode("PAUSED")))
-	s.mux.HandleFunc("POST /api/mode/safe", s.auth(gw.handleSetMode("SAFE")))
-	s.mux.HandleFunc("POST /api/mode/flatten", s.auth(gw.handleSetMode("FLATTEN")))
-	s.mux.HandleFunc("POST /api/mode/running", s.auth(gw.handleSetMode("RUNNING")))
+	s.mux.HandleFunc("POST /api/mode/pause", s.authRole(auth.RoleTrader, gw.handleSetMode("PAUSED")))
+	s.mux.HandleFunc("POST /api/mode/safe", s.authRole(auth.RoleTrader, gw.handleSetMode("SAFE")))
+	s.mux.HandleFunc("POST /api/mode/flatten", s.authRole(auth.RoleTrader, gw.handleSetMode("FLATTEN")))
+	s.mux.HandleFunc("POST /api/mode/running", s.authRole(auth.RoleTrader, gw.handleSetMode("RUNNING")))
 	s.mux.HandleFunc("GET /api/risk/state", s.auth(gw.handleGetRiskState))
 	s.mux.HandleFunc("GET /api/risk/history", s.auth(gw.handleGetRiskHistory))
 	s.mux.HandleFunc("GET /api/risk/alerts", s.auth(gw.handleGetRiskAlerts))
@@ -44,23 +47,41 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	s.mux.HandleFunc("GET /api/pnl/attribution", s.auth(gw.handleGetPnLAttribution))
 	s.mux.HandleFunc("GET /api/metrics/kpi", s.auth(gw.handleGetKPI))
 
-	// Positions (Redis-based, from execution router paper positions)
+	// Positions (Redis-based paper positions)
 	s.mux.HandleFunc("GET /api/positions", s.auth(gw.handleGetPositions))
 
-	// Intents
+	// Intents / orders
 	s.mux.HandleFunc("GET /api/intents", s.auth(gw.handleGetIntents))
-
-	// Orders / fills
 	s.mux.HandleFunc("GET /api/orders", s.auth(gw.handleGetOrders))
 
-	// Funding rates (from market:quotes latest per venue)
+	// Funding rates
 	s.mux.HandleFunc("GET /api/funding/rates", s.auth(gw.handleGetFundingRates))
 
 	// Paper trading mode
 	s.mux.HandleFunc("GET /api/paper/mode", s.auth(gw.handleGetPaperMode))
-	s.mux.HandleFunc("PUT /api/paper/mode", s.auth(gw.handleSetPaperMode))
+	s.mux.HandleFunc("PUT /api/paper/mode", s.authRole(auth.RoleTrader, gw.handleSetPaperMode))
 
-	// Health
+	// ── V3: Identity ──────────────────────────────────────────────────────
+	s.mux.HandleFunc("GET /api/auth/me", s.auth(gw.handleAuthMe))
+
+	// ── V3: API key management (admin only) ───────────────────────────────
+	s.mux.HandleFunc("GET /api/auth/keys", s.authRole(auth.RoleAdmin, gw.handleListAPIKeys))
+	s.mux.HandleFunc("POST /api/auth/keys", s.authRole(auth.RoleAdmin, gw.handleCreateAPIKey))
+	s.mux.HandleFunc("DELETE /api/auth/keys/{id}", s.authRole(auth.RoleAdmin, gw.handleDeleteAPIKey))
+
+	// ── V3: Tenant branding ───────────────────────────────────────────────
+	s.mux.HandleFunc("GET /api/tenant/branding", s.auth(gw.handleGetBranding))
+	s.mux.HandleFunc("PUT /api/tenant/branding", s.authRole(auth.RoleAdmin, gw.handleSetBranding))
+
+	// ── V3: Reporting — CSV exports ───────────────────────────────────────
+	s.mux.HandleFunc("GET /api/reports/fills", s.auth(gw.handleReportFills))
+	s.mux.HandleFunc("GET /api/reports/pnl", s.auth(gw.handleReportPnL))
+
+	// ── V3: SOC2 audit trail export ───────────────────────────────────────
+	s.mux.HandleFunc("GET /api/audit", s.authRole(auth.RoleAuditor, gw.handleGetAudit))
+	s.mux.HandleFunc("GET /api/audit/export", s.authRole(auth.RoleAuditor, gw.handleExportAudit))
+
+	// Health (public)
 	s.mux.HandleFunc("GET /api/health", gw.handleHealth)
 }
 
@@ -84,6 +105,13 @@ func (gw *Gateway) handleSetMode(target string) http.HandlerFunc {
 		if err := gw.rdb.Set(r.Context(), "risk:commanded_mode", target, 0).Err(); err != nil {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		// Audit log.
+		if gw.db != nil {
+			if key := auth.FromContext(r.Context()); key != nil {
+				_ = gw.db.AuditLogRich(r.Context(), key.TenantID, key.Name, string(key.Role),
+					auth.ClientIP(r), "set_mode:"+target, map[string]string{"mode": target})
+			}
 		}
 		jsonOK(w, map[string]string{"status": "commanded", "mode": target})
 	}
@@ -165,10 +193,9 @@ func (gw *Gateway) handleGetPnLAttribution(w http.ResponseWriter, r *http.Reques
 	jsonOK(w, rows)
 }
 
-// ── Positions (from Redis paper position store) ───────────────────────────
+// ── Positions ─────────────────────────────────────────────────────────────
 
 func (gw *Gateway) handleGetPositions(w http.ResponseWriter, r *http.Request) {
-	// Scan all position keys for this tenant.
 	pattern := "paper:pos:" + gw.tenantID + ":*"
 	keys, err := gw.rdb.Keys(r.Context(), pattern).Result()
 	if err != nil {
@@ -197,14 +224,13 @@ func (gw *Gateway) handleGetPositions(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, positions)
 }
 
-// ── Intents (recent from Redis stream snapshot) ───────────────────────────
+// ── Intents ───────────────────────────────────────────────────────────────
 
 func (gw *Gateway) handleGetIntents(w http.ResponseWriter, r *http.Request) {
 	count, _ := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64)
 	if count == 0 {
 		count = 50
 	}
-	// Read recent messages from the intents stream (non-destructive XREVRANGE).
 	msgs, err := gw.rdb.XRevRangeN(r.Context(), "trade:intents:approved", "+", "-", count).Result()
 	if err != nil {
 		jsonOK(w, []interface{}{})
@@ -224,11 +250,10 @@ func (gw *Gateway) handleGetIntents(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, intents)
 }
 
-// ── Orders (recent fills from Redis) ─────────────────────────────────────
+// ── Orders ────────────────────────────────────────────────────────────────
 
 func (gw *Gateway) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 	if gw.db == nil {
-		// Fall back to Redis stream.
 		count, _ := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64)
 		if count == 0 {
 			count = 50
@@ -264,16 +289,14 @@ func (gw *Gateway) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, rows)
 }
 
-// ── Funding rates (latest per venue from Redis) ───────────────────────────
+// ── Funding rates ─────────────────────────────────────────────────────────
 
 func (gw *Gateway) handleGetFundingRates(w http.ResponseWriter, r *http.Request) {
-	// Read the very latest quotes from market:quotes stream — one per venue/symbol.
 	msgs, err := gw.rdb.XRevRangeN(r.Context(), "market:quotes", "+", "-", 200).Result()
 	if err != nil {
 		jsonOK(w, map[string]interface{}{})
 		return
 	}
-	// Deduplicate to latest per venue+symbol.
 	latest := make(map[string]map[string]interface{})
 	for _, m := range msgs {
 		raw, ok := m.Values["data"].(string)
@@ -291,14 +314,12 @@ func (gw *Gateway) handleGetFundingRates(w http.ResponseWriter, r *http.Request)
 			latest[key] = q
 		}
 	}
-	// Return just funding rate fields.
 	result := make(map[string]interface{})
 	for k, q := range latest {
-		fr := q["funding_rate"]
 		result[k] = map[string]interface{}{
 			"venue":        q["venue"],
 			"symbol":       q["symbol"],
-			"funding_rate": fr,
+			"funding_rate": q["funding_rate"],
 			"mark":         q["mark"],
 			"ts_ms":        q["ts_ms"],
 		}
@@ -335,6 +356,21 @@ func (gw *Gateway) handleSetPaperMode(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{"status": "updated", "mode": req.Mode})
 }
 
+// ── KPI ───────────────────────────────────────────────────────────────────
+
+func (gw *Gateway) handleGetKPI(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonOK(w, map[string]interface{}{"note": "postgres not connected"})
+		return
+	}
+	kpis, err := gw.db.KPISummary(r.Context(), gw.tenantID)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, kpis)
+}
+
 // ── Health ────────────────────────────────────────────────────────────────
 
 func (gw *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -352,26 +388,297 @@ func (gw *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Ensure Server has a gw field. This is added here to avoid touching server.go.
-// We extend Server using a package-level init trick: add the field via embedding helper.
-// Actually we just use a pointer stored on Server — see server_gw.go for the field.
-// ── KPI ──────────────────────────────────────────────────────────────────
+// ── V3: Identity ──────────────────────────────────────────────────────────
 
-func (gw *Gateway) handleGetKPI(w http.ResponseWriter, r *http.Request) {
-	if gw.db == nil {
-		jsonOK(w, map[string]interface{}{"note": "postgres not connected"})
+// handleAuthMe returns the current key's role, tenant, and display name.
+func (gw *Gateway) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	key := auth.FromContext(r.Context())
+	if key == nil {
+		jsonOK(w, map[string]interface{}{"role": "admin", "tenant_id": gw.tenantID, "name": "dev"})
 		return
 	}
-	kpis, err := gw.db.KPISummary(r.Context(), gw.tenantID)
+	jsonOK(w, map[string]interface{}{
+		"id":        key.ID,
+		"tenant_id": key.TenantID,
+		"name":      key.Name,
+		"role":      string(key.Role),
+	})
+}
+
+// ── V3: API key management ────────────────────────────────────────────────
+
+func (gw *Gateway) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonOK(w, []interface{}{})
+		return
+	}
+	keys, err := gw.db.ListAPIKeys(r.Context(), gw.tenantID)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonOK(w, kpis)
+	jsonOK(w, keys)
 }
 
+func (gw *Gateway) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonErr(w, "postgres required for API key management", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		Name string    `json:"name"`
+		Role auth.Role `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonErr(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		jsonErr(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	validRoles := map[auth.Role]bool{
+		auth.RoleAdmin: true, auth.RoleTrader: true,
+		auth.RoleViewer: true, auth.RoleAuditor: true,
+	}
+	if !validRoles[req.Role] {
+		jsonErr(w, "role must be admin, trader, viewer, or auditor", http.StatusBadRequest)
+		return
+	}
 
-func init() {
-	// Placeholder to ensure file compiles.
-	_ = (*Gateway)(nil)
+	fullKey, prefix, keyHash, err := auth.GenerateKey()
+	if err != nil {
+		jsonErr(w, "key generation failed", http.StatusInternalServerError)
+		return
+	}
+	id, err := gw.db.CreateAPIKey(r.Context(), gw.tenantID, req.Name, req.Role, prefix, keyHash)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Audit log.
+	if actor := auth.FromContext(r.Context()); actor != nil {
+		_ = gw.db.AuditLogRich(r.Context(), gw.tenantID, actor.Name, string(actor.Role),
+			auth.ClientIP(r), "create_api_key", map[string]interface{}{"id": id, "name": req.Name, "role": req.Role})
+	}
+
+	// Return the full key only once — it cannot be retrieved again.
+	jsonOK(w, map[string]interface{}{
+		"id":         id,
+		"name":       req.Name,
+		"role":       string(req.Role),
+		"key":        fullKey,
+		"key_prefix": prefix,
+		"warning":    "Store this key securely — it will not be shown again.",
+	})
+}
+
+func (gw *Gateway) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonErr(w, "postgres required for API key management", http.StatusServiceUnavailable)
+		return
+	}
+	keyID := r.PathValue("id")
+	if keyID == "" {
+		jsonErr(w, "missing key id", http.StatusBadRequest)
+		return
+	}
+	if err := gw.db.DeleteAPIKey(r.Context(), gw.tenantID, keyID); err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if actor := auth.FromContext(r.Context()); actor != nil {
+		_ = gw.db.AuditLogRich(r.Context(), gw.tenantID, actor.Name, string(actor.Role),
+			auth.ClientIP(r), "delete_api_key", map[string]string{"id": keyID})
+	}
+	jsonOK(w, map[string]string{"status": "deleted"})
+}
+
+// ── V3: Tenant branding ───────────────────────────────────────────────────
+
+func (gw *Gateway) handleGetBranding(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonOK(w, map[string]interface{}{
+			"id": gw.tenantID, "name": "ArbSuite",
+			"logo_url": "", "primary_color": "#3b82f6", "accent_color": "#f97316",
+		})
+		return
+	}
+	branding, err := gw.db.GetTenantBranding(r.Context(), gw.tenantID)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, branding)
+}
+
+func (gw *Gateway) handleSetBranding(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonErr(w, "postgres required for branding management", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		Name         string `json:"name"`
+		LogoURL      string `json:"logo_url"`
+		PrimaryColor string `json:"primary_color"`
+		AccentColor  string `json:"accent_color"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonErr(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		req.Name = "ArbSuite"
+	}
+	if req.PrimaryColor == "" {
+		req.PrimaryColor = "#3b82f6"
+	}
+	if req.AccentColor == "" {
+		req.AccentColor = "#f97316"
+	}
+	if err := gw.db.UpsertTenantBranding(r.Context(), gw.tenantID, req.Name, req.LogoURL, req.PrimaryColor, req.AccentColor); err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if actor := auth.FromContext(r.Context()); actor != nil {
+		_ = gw.db.AuditLogRich(r.Context(), gw.tenantID, actor.Name, string(actor.Role),
+			auth.ClientIP(r), "update_branding", req)
+	}
+	jsonOK(w, map[string]string{"status": "updated"})
+}
+
+// ── V3: CSV reporting ─────────────────────────────────────────────────────
+
+// handleReportFills streams a CSV of fills optionally filtered by date range.
+func (gw *Gateway) handleReportFills(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonErr(w, "postgres required for reports", http.StatusServiceUnavailable)
+		return
+	}
+	from, to, limit := parseDateRange(r)
+	rows, err := gw.db.ExportFills(r.Context(), gw.tenantID, from, to, limit)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="fills_%s.csv"`,
+		time.Now().Format("20060102")))
+	wr := csv.NewWriter(w)
+	_ = wr.Write([]string{"id", "intent_id", "strategy", "symbol", "price", "notional",
+		"fees", "slippage_bps", "net_pnl_usd", "mode", "ts"})
+	for _, row := range rows {
+		_ = wr.Write([]string{
+			fmt.Sprint(row["id"]), fmt.Sprint(row["intent_id"]),
+			fmt.Sprint(row["strategy"]), fmt.Sprint(row["symbol"]),
+			fmt.Sprint(row["price"]), fmt.Sprint(row["notional"]),
+			fmt.Sprint(row["fees"]), fmt.Sprint(row["slippage_bps"]),
+			fmt.Sprint(row["net_pnl_usd"]), fmt.Sprint(row["mode"]),
+			fmt.Sprint(row["ts"]),
+		})
+	}
+	wr.Flush()
+}
+
+// handleReportPnL streams a CSV of PnL by strategy.
+func (gw *Gateway) handleReportPnL(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonErr(w, "postgres required for reports", http.StatusServiceUnavailable)
+		return
+	}
+	rows, err := gw.db.PnLSummary(r.Context(), gw.tenantID)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="pnl_%s.csv"`,
+		time.Now().Format("20060102")))
+	wr := csv.NewWriter(w)
+	_ = wr.Write([]string{"strategy", "total_pnl", "fill_count", "total_fees"})
+	for _, row := range rows {
+		_ = wr.Write([]string{
+			fmt.Sprint(row["strategy"]),
+			fmt.Sprint(row["total_pnl"]),
+			fmt.Sprint(row["fill_count"]),
+			fmt.Sprint(row["total_fees"]),
+		})
+	}
+	wr.Flush()
+}
+
+// ── V3: SOC2 audit trail ──────────────────────────────────────────────────
+
+// handleGetAudit returns recent audit log entries as JSON.
+func (gw *Gateway) handleGetAudit(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonOK(w, []interface{}{})
+		return
+	}
+	from, to, limit := parseDateRange(r)
+	rows, err := gw.db.ExportAuditLog(r.Context(), gw.tenantID, from, to, limit)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, rows)
+}
+
+// handleExportAudit streams a SOC2-ready CSV of the audit trail.
+func (gw *Gateway) handleExportAudit(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonErr(w, "postgres required for audit export", http.StatusServiceUnavailable)
+		return
+	}
+	from, to, limit := parseDateRange(r)
+	rows, err := gw.db.ExportAuditLog(r.Context(), gw.tenantID, from, to, limit)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="audit_%s_to_%s.csv"`,
+		from.Format("20060102"), to.Format("20060102")))
+	wr := csv.NewWriter(w)
+	_ = wr.Write([]string{"id", "ts", "actor", "role", "ip_address", "action", "payload"})
+	for _, row := range rows {
+		_ = wr.Write([]string{
+			fmt.Sprint(row["id"]),
+			fmt.Sprint(row["ts"]),
+			fmt.Sprint(row["actor"]),
+			fmt.Sprint(row["role"]),
+			fmt.Sprint(row["ip_address"]),
+			fmt.Sprint(row["action"]),
+			fmt.Sprint(row["payload"]),
+		})
+	}
+	wr.Flush()
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+// parseDateRange extracts ?from=, ?to=, and ?limit= query params with safe defaults.
+func parseDateRange(r *http.Request) (from, to time.Time, limit int) {
+	to = time.Now().UTC()
+	from = to.AddDate(0, -1, 0) // default: last 30 days
+
+	if s := r.URL.Query().Get("from"); s != "" {
+		if t, err := time.Parse("2006-01-02", s); err == nil {
+			from = t.UTC()
+		}
+	}
+	if s := r.URL.Query().Get("to"); s != "" {
+		if t, err := time.Parse("2006-01-02", s); err == nil {
+			to = t.Add(24*time.Hour - time.Second).UTC()
+		}
+	}
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 50000 {
+		limit = 10000
+	}
+	return
 }

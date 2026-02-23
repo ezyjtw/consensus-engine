@@ -5,6 +5,9 @@ import (
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/ezyjtw/consensus-engine/internal/auth"
+	"github.com/ezyjtw/consensus-engine/internal/ledger"
 )
 
 // knownExchanges is the authoritative list of supported venues.
@@ -12,12 +15,13 @@ var knownExchanges = []string{"binance", "okx", "bybit", "deribit", "htx", "gate
 
 // Server wires up all HTTP routes for the dashboard.
 type Server struct {
-	gw          *Gateway
-	store       *Store
-	sse         *StreamHandler
-	alerts      *AlertWorker
-	authToken   string
-	mux         *http.ServeMux
+	gw        *Gateway
+	store     *Store
+	sse       *StreamHandler
+	alerts    *AlertWorker
+	authToken string // legacy single-token auth; role = admin
+	db        *ledger.DB
+	mux       *http.ServeMux
 }
 
 func NewServer(store *Store, sse *StreamHandler, alerts *AlertWorker, authToken string) *Server {
@@ -32,6 +36,9 @@ func NewServer(store *Store, sse *StreamHandler, alerts *AlertWorker, authToken 
 	return s
 }
 
+// SetDB wires the Postgres DB for RBAC API-key validation.
+func (s *Server) SetDB(db *ledger.DB) { s.db = db }
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
@@ -44,40 +51,79 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/events", s.auth(s.sse.ServeHTTP))
 
 	s.mux.HandleFunc("GET /api/connections", s.auth(s.handleGetConnections))
-	s.mux.HandleFunc("PUT /api/connections/{exchange}", s.auth(s.handleSaveConnection))
+	s.mux.HandleFunc("PUT /api/connections/{exchange}", s.authRole(auth.RoleAdmin, s.handleSaveConnection))
 
 	s.mux.HandleFunc("GET /api/alerts", s.auth(s.handleGetAlerts))
-	s.mux.HandleFunc("PUT /api/alerts", s.auth(s.handleSaveAlerts))
-	s.mux.HandleFunc("POST /api/alerts/test", s.auth(s.handleTestWebhook))
+	s.mux.HandleFunc("PUT /api/alerts", s.authRole(auth.RoleTrader, s.handleSaveAlerts))
+	s.mux.HandleFunc("POST /api/alerts/test", s.authRole(auth.RoleTrader, s.handleTestWebhook))
 
 	s.mux.HandleFunc("GET /api/kill", s.auth(s.handleGetKill))
-	s.mux.HandleFunc("POST /api/kill", s.auth(s.handleActivateKill))
-	s.mux.HandleFunc("DELETE /api/kill", s.auth(s.handleDeactivateKill))
+	s.mux.HandleFunc("POST /api/kill", s.authRole(auth.RoleTrader, s.handleActivateKill))
+	s.mux.HandleFunc("DELETE /api/kill", s.authRole(auth.RoleTrader, s.handleDeactivateKill))
 }
 
-// auth is a middleware that checks for a valid Bearer token.
-// SSE connections may pass the token as ?token=<value> because the browser
-// EventSource API does not support custom request headers.
+// ── Auth middleware ────────────────────────────────────────────────────────
+
+// auth validates the request (legacy token or DB API key) and stores the
+// resulting *auth.APIKey in the context. Returns 401 if auth fails.
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// No auth configured → open access (useful during local dev).
-		if s.authToken == "" {
-			next(w, r)
-			return
-		}
-		token := ""
-		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-			token = strings.TrimPrefix(h, "Bearer ")
-		}
-		if token == "" {
-			token = r.URL.Query().Get("token")
-		}
-		if token != s.authToken {
+		key := s.resolveKey(r)
+		if key == nil {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
-		next(w, r)
+		next(w, r.WithContext(auth.WithAPIKey(r.Context(), key)))
 	}
+}
+
+// authRole wraps auth and additionally enforces a minimum role.
+func (s *Server) authRole(minRole auth.Role, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := s.resolveKey(r)
+		if key == nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		if err := auth.RequireRole(key, minRole); err != nil {
+			jsonErr(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		next(w, r.WithContext(auth.WithAPIKey(r.Context(), key)))
+	}
+}
+
+// resolveKey authenticates via legacy token (→ admin) or DB API key.
+// Returns nil if authentication fails.
+func (s *Server) resolveKey(r *http.Request) *auth.APIKey {
+	token := auth.ExtractBearer(r)
+	if token == "" {
+		// No auth configured in dev mode.
+		if s.authToken == "" && s.db == nil {
+			return &auth.APIKey{Role: auth.RoleAdmin, TenantID: "default", Name: "dev"}
+		}
+		return nil
+	}
+
+	// Legacy single-token mode.
+	if s.authToken != "" && token == s.authToken {
+		return &auth.APIKey{Role: auth.RoleAdmin, TenantID: "default", Name: "legacy"}
+	}
+
+	// DB-backed API key lookup.
+	if s.db != nil {
+		keyHash := auth.HashKey(token)
+		apiKey, err := s.db.ValidateAPIKey(r.Context(), keyHash)
+		if err == nil && apiKey != nil {
+			return apiKey
+		}
+	}
+
+	// Allow legacy token even without DB.
+	if s.authToken != "" && token == s.authToken {
+		return &auth.APIKey{Role: auth.RoleAdmin, TenantID: "default", Name: "legacy"}
+	}
+	return nil
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +160,13 @@ func (s *Server) handleSaveConnection(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SaveConnection(r.Context(), exchange, req.APIKey, req.APISecret, req.Passphrase); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	// Audit log.
+	if s.db != nil {
+		if key := auth.FromContext(r.Context()); key != nil {
+			_ = s.db.AuditLogRich(r.Context(), key.TenantID, key.Name, string(key.Role),
+				auth.ClientIP(r), "save_connection:"+exchange, map[string]string{"exchange": exchange})
+		}
 	}
 	log.Printf("connection saved for %s", exchange)
 	jsonOK(w, map[string]string{"status": "saved"})
@@ -176,6 +229,13 @@ func (s *Server) handleActivateKill(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Audit log.
+	if s.db != nil {
+		if key := auth.FromContext(r.Context()); key != nil {
+			_ = s.db.AuditLogRich(r.Context(), key.TenantID, key.Name, string(key.Role),
+				auth.ClientIP(r), "kill_switch_activated", map[string]string{"reason": req.Reason})
+		}
+	}
 	log.Printf("KILL SWITCH ACTIVATED — reason: %q", req.Reason)
 	jsonOK(w, map[string]string{"status": "activated"})
 }
@@ -184,6 +244,12 @@ func (s *Server) handleDeactivateKill(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SetKillSwitch(r.Context(), false, ""); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if s.db != nil {
+		if key := auth.FromContext(r.Context()); key != nil {
+			_ = s.db.AuditLogRich(r.Context(), key.TenantID, key.Name, string(key.Role),
+				auth.ClientIP(r), "kill_switch_deactivated", nil)
+		}
 	}
 	log.Println("KILL SWITCH DEACTIVATED")
 	jsonOK(w, map[string]string{"status": "deactivated"})
@@ -210,3 +276,6 @@ func isKnown(exchange string) bool {
 	}
 	return false
 }
+
+// ensure strings is used (auth.ExtractBearer uses it).
+var _ = strings.HasPrefix

@@ -99,10 +99,38 @@ CREATE TABLE IF NOT EXISTS funding_payments (
     ts          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ── V3: RBAC API keys ──────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS api_keys (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id    TEXT        NOT NULL,
+    name         TEXT        NOT NULL,
+    key_prefix   TEXT        NOT NULL,      -- first ~11 chars for display
+    key_hash     TEXT        NOT NULL UNIQUE, -- SHA-256 of full key
+    role         TEXT        NOT NULL,      -- admin/trader/viewer/auditor
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ
+);
+
+-- ── V3: Tenant branding ────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS tenants (
+    id            TEXT        PRIMARY KEY,
+    name          TEXT        NOT NULL,
+    logo_url      TEXT        NOT NULL DEFAULT '',
+    primary_color TEXT        NOT NULL DEFAULT '#3b82f6',
+    accent_color  TEXT        NOT NULL DEFAULT '#f97316',
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── V3: Enhanced audit_log (add ip_address + role columns) ────────────────
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS ip_address TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS role       TEXT;
+
 -- Indexes for common query patterns.
 CREATE INDEX IF NOT EXISTS idx_fills_tenant_ts      ON fills (tenant_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_fills_strategy       ON fills (strategy, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_severity      ON alerts (severity, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_risk_snapshots_ts    ON risk_state_snapshots (tenant_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_positions_venue      ON positions_snapshots (tenant_id, venue, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_api_keys_tenant      ON api_keys (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_tenant_ts  ON audit_log (tenant_id, ts DESC);
 `
