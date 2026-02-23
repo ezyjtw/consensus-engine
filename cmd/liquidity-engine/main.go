@@ -139,7 +139,7 @@ func main() {
 			// Read consensus quality from latest consensus:updates key.
 			quality := sc.GetString(ctx, "consensus:quality:"+string(q.Symbol))
 			if quality == "" {
-				quality = "HIGH" // assume high if key absent (engine not yet running)
+				quality = "LOW" // assume LOW when consensus is not publishing — safe default
 			}
 
 			intents := engine.Evaluate(q, quality)

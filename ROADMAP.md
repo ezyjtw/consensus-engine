@@ -1,6 +1,6 @@
 # ArbSuite — Full Product Roadmap & Implementation Status
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-23
 > Status tracked against the full product specification.
 
 ---
@@ -35,52 +35,89 @@
 
 | Component | Status | V1 Required | Notes |
 |---|---|---|---|
-| **Market Data Service** | ❌ 0% | YES — BLOCKING | Nothing writes to `market:quotes`. All downstream engines are starved without this. |
-| **Consensus Price Engine** | ✅ 95% | YES | Fully implemented. MAD outlier detection, trust model, circuit breaker, band computation, VWAP. |
-| **Arb Opportunity Engine** | ✅ 95% | YES | Fully implemented. Quality gating, venue filtering, latency-buffered edge, cooldown, disjoint pairs. |
-| **Funding Engine** | ❌ 0% | YES | Not started. |
-| **Capital Allocator** | ❌ 0% | YES | Not started. |
-| **Execution Router** | ❌ 0% | YES | Not started. Intents are emitted but never consumed. |
-| **Risk Daemon** | ❌ 5% | YES | Kill switch key exists. No continuous risk metrics, no PAUSE/SAFE/FLATTEN logic. |
-| **Ledger + Reconciliation** | ❌ 0% | YES (basic) | No persistent store. All state is in-memory or Redis only. |
-| **Paper Trading Service** | ❌ 0% | YES | Not started. |
-| **Rebalance + Transfer** | ❌ 0% | NO (V2) | Not started. |
-| **Liquidity Inefficiency Engine** | ❌ 0% | NO (V2) | Not started. |
-| **Collateral Manager (DeFi)** | ❌ 0% | NO (V2) | Not started. |
-| **Gateway API** | ❌ 10% | YES | Dashboard exposes some endpoints. No positions/PnL/intents/risk endpoints. |
-| **Dashboard UI** | 🟡 20% | YES | Real-time feed, kill switch, alerts, credentials. Missing all trading and PnL views. |
-| **Postgres persistence** | ❌ 0% | YES (basic) | Not present. All data is ephemeral. |
-| **Docker Compose** | ❌ 0% | YES | Two individual Dockerfiles exist; no compose stack. |
+| **Market Data Service** | ✅ 90% | YES | `cmd/market-data` implemented with Binance/OKX/Bybit/Deribit adapters. Publishes to `market:quotes`. |
+| **Consensus Price Engine** | ✅ 95% | YES | MAD outlier detection, trust model, circuit breaker, band computation, VWAP, anomaly streams. |
+| **Arb Opportunity Engine** | ✅ 95% | YES | Quality gating, venue filtering, latency-buffered edge, cooldown, disjoint pairs, intent emission. |
+| **Funding Engine** | ✅ 85% | YES | `cmd/funding-engine` implemented; emits carry intents on interval; obeys kill switch. |
+| **Capital Allocator** | ✅ 85% | YES | `cmd/capital-allocator` implemented; quality gating, system mode gating, notional caps. |
+| **Execution Router** | ✅ 80% | YES | Paper executor (`PaperExecutor`) implemented; PAPER/SHADOW/LIVE mode selection; consumes approved intents. |
+| **Risk Daemon** | ✅ 90% | YES | Full mode machine (RUNNING/PAUSED/SAFE/FLATTEN/HALTED); drawdown, error rate, ADL risk, liq clusters, venue delev events. |
+| **Ledger + Reconciliation** | ✅ 85% | YES | Postgres (pgx/v5); fills, execution events, risk state/alerts, audit log, PnL summary, KPI. |
+| **Paper Trading Service** | ✅ 80% | YES | Simulated paper fills; Redis position tracking; PnL attribution; confidence score. |
+| **Transfer Policy Engine** | ✅ 85% | NO (V2) | `internal/transfer` + `cmd/transfer-policy`: allowlist, tamper detection (SHA-256), velocity limits, manual approval gate. |
+| **Liquidity Inefficiency Engine** | ✅ 80% | NO (V2) | Spread blowout, thin book, mark-index divergence, imbalance, cascade proxy detection. |
+| **DEX Routing (optional)** | ✅ 70% | NO (V3) | `internal/dex` + `configs/policies/dex_routing.yaml`; 1inch Fusion + Paraswap; disabled by default. |
+| **L2 Bridge (optional)** | ✅ 70% | NO (V3) | `internal/l2` + `configs/policies/l2_transfers.yaml`; Arbitrum/Optimism/Base; disabled by default. |
+| **Collateral Manager (DeFi)** | ❌ 0% | NO (V3) | Not yet started. |
+| **Gateway API** | ✅ 90% | YES | Full REST API: mode, risk, PnL, positions, intents, orders, funding, timeline, confidence, reports, audit. |
+| **Dashboard UI** | ✅ 80% | YES | Real-time SSE; Home/Operator view; Risk Cockpit; Timeline; P&L + confidence; mobile-first layout; RBAC; branding. |
+| **RBAC / API Keys** | ✅ 90% | NO (V3) | 4-role hierarchy (admin/trader/viewer/auditor); SHA-256 key hashing; SOC2 audit log. |
+| **Postgres persistence** | ✅ 85% | YES | Schema auto-migrated on startup; fills, events, risk, audit, API keys, tenant branding. |
+| **Docker Compose** | ✅ 90% | YES | Full stack in `docker-compose.yaml`; Redis + Postgres + all services wired. |
+
+**Overall V1 completion: ~85%**
 
 ### 1.2 What is actually built and working
 
 ```
-[nothing] ──────────────────────────────────────────────── market:quotes
-                                                               │
-                                                   ┌───────────▼────────────┐
-                                                   │  Consensus Engine ✅   │
-                                                   │  · MAD outlier detect  │
-                                                   │  · Trust model         │
-                                                   │  · Circuit breaker     │
-                                                   │  · VWAP band           │
-                                                   └──┬────────┬────────────┘
-                                          consensus:  │        │ venue_anomalies
-                                          updates     │        │ venue_status
-                                                      │        │
-                                          ┌───────────▼─────┐  └──► Dashboard ✅
-                                          │  Arb Engine ✅  │       · Real-time SSE
-                                          │  · Quality gate │       · Kill switch
-                                          │  · Edge calc    │       · Credentials
-                                          │  · Cooldown     │       · Alert webhooks
-                                          └────────┬────────┘
-                                                   │ trade:intents
-                                                   │
-                                              [nothing] ◄── Execution Router ❌
+Market Data ✅ ──────────────────── market:quotes (Binance/OKX/Bybit/Deribit)
+                                            │
+                            ┌───────────────▼───────────────┐
+                            │  Consensus Engine ✅          │
+                            │  · MAD outlier detection      │
+                            │  · Trust model + breaker      │
+                            │  · VWAP band + anomaly stream │
+                            └──┬──────────────┬─────────────┘
+               consensus:      │              │ consensus:anomalies
+               updates         │              │ venue_status
+                               │              └──────────────────► Dashboard ✅
+                    ┌──────────▼──────────┐                       · Mobile-first UI
+                    │  Arb Engine ✅      │                       · Home/Operator view
+                    │  Funding Engine ✅  │                       · Risk Cockpit
+                    │  Liq Engine ✅      │                       · Timeline view
+                    └──────────┬──────────┘                       · Paper confidence
+                               │ trade:intents                     · RBAC + audit log
+                    ┌──────────▼──────────┐
+                    │  Capital Allocator ✅│
+                    │  · Quality gating   │
+                    │  · Mode gating      │
+                    │  · Notional caps    │
+                    └──────────┬──────────┘
+                               │ trade:intents:approved
+                    ┌──────────▼──────────┐
+                    │  Execution Router ✅│
+                    │  · PAPER executor  │
+                    │  · SHADOW/LIVE stub │
+                    └──────────┬──────────┘
+                               │ execution:events
+             ┌─────────────────▼──────────────────┐
+             │  Ledger ✅ (Postgres pgx/v5)        │
+             │  · Fills, PnL, risk state, audit    │
+             └─────────────────────────────────────┘
+             ┌─────────────────────────────────────┐
+             │  Risk Daemon ✅                     │
+             │  · RUNNING/PAUSED/SAFE/FLATTEN      │
+             │  · Drawdown + error rate            │
+             │  · ADL risk + liq clusters          │
+             │  · Venue deleveraging events        │
+             └─────────────────────────────────────┘
+             ┌─────────────────────────────────────┐
+             │  Transfer Policy Engine ✅          │
+             │  · Allowlist enforcement            │
+             │  · SHA-256 tamper detection         │
+             │  · Velocity limits + manual approval│
+             └─────────────────────────────────────┘
 ```
 
-### 1.3 The single most critical gap
+### 1.3 Remaining gaps before live trading
 
-**The Market Data Service does not exist.** Every engine is built and ready to receive data, but nothing connects to exchange APIs and publishes to `market:quotes`. Fixing this is the prerequisite for any live testing.
+1. **Live exchange connectors** — `PaperExecutor` is fully working; a `LiveExecutor` needs real REST/WS order placement, cancel/replace, post-only logic, and per-venue risk (tick size, min qty, reduce-only).
+
+2. **Fill reconciliation** — Live mode requires reconciling fills against exchange reports to detect partials, ADL impacts, and latency gaps.
+
+3. **Transfer Policy wiring into compose** — `internal/transfer` + `cmd/transfer-policy` exist and are fully implemented; they need a Dockerfile and entry in `docker-compose.yaml` plus dashboard transfer approval flow.
+
+4. **Production WebSocket reconnect/sequencing** — `cmd/market-data` connects to exchanges; full production-grade reconnect + sequence-gap detection needed for mission-critical use.
 
 ---
 
@@ -88,7 +125,7 @@
 
 ### Service A: Market Data Service
 
-**Status:** ❌ Not started — V1 BLOCKER
+**Status:** ✅ Implemented — `cmd/market-data`
 
 **Runs as:** `cmd/market-data/`
 
@@ -819,64 +856,72 @@ Flatten sequence (always executed by Risk Daemon independently):
 
 ## 6. V1 → V3 Roadmap
 
-### V1 — Close the money loop (current priority)
+### V1 — Close the money loop ✅ ~85% complete
 
 **Goal:** End-to-end flow: live data → consensus → arb/funding intents → paper execution → PnL
 
-| # | Component | Blocks |
+| # | Component | Status |
 |---|---|---|
-| 1 | **Market Data Service** (exchange WS connectors) | Everything |
-| 2 | **Paper Trading Service** (pure simulation) | Dashboard PnL; user trust |
-| 3 | **Ledger** (basic Postgres + append-only events) | PnL; reconciliation |
-| 4 | **Docker Compose** (full local stack) | Dev velocity; demos |
-| 5 | **Funding Engine** (basic carry + differential) | Yield expansion |
-| 6 | **Execution Router** (two-leg safe execution, paper mode first) | Live trading |
-| 7 | **Risk Daemon** (continuous metrics + PAUSE/SAFE/FLATTEN) | Safety |
-| 8 | **Capital Allocator** (basic caps + quality gating) | Position sizing |
-| 9 | **Gateway API** (positions, PnL, intents, risk endpoints) | Dashboard |
-| 10 | **Dashboard V1 rebuild** (equity, positions, opportunities, paper metrics) | User trust |
+| 1 | **Market Data Service** (exchange WS connectors) | ✅ Done — `cmd/market-data` |
+| 2 | **Paper Trading Service** (pure simulation) | ✅ Done — `cmd/paper-trader` via `PaperExecutor` |
+| 3 | **Ledger** (basic Postgres + append-only events) | ✅ Done — `cmd/ledger`, pgx/v5 |
+| 4 | **Docker Compose** (full local stack) | ✅ Done — `docker-compose.yaml` |
+| 5 | **Funding Engine** (basic carry + differential) | ✅ Done — `cmd/funding-engine` |
+| 6 | **Execution Router** (two-leg safe execution, paper mode first) | ✅ Done — `cmd/execution-router` (paper) |
+| 7 | **Risk Daemon** (continuous metrics + PAUSE/SAFE/FLATTEN) | ✅ Done — `cmd/risk-daemon` |
+| 8 | **Capital Allocator** (basic caps + quality gating) | ✅ Done — `cmd/capital-allocator` |
+| 9 | **Gateway API** (positions, PnL, intents, risk, timeline, confidence) | ✅ Done — `internal/dashboard/gateway.go` |
+| 10 | **Dashboard** (home view, risk cockpit, timeline, paper confidence) | ✅ Done — mobile-first redesign |
 
-### V2 — Yield expansion + automation
+**Remaining V1 work:**
+- Live exchange order placement (LiveExecutor) — REST/WS per venue
+- Fill reconciliation against exchange reports
+- Production WebSocket reconnect + sequence validation
 
-- Liquidity Inefficiency Engine (spread capture + liquidation contra)
-- Smarter execution: IOC/limit choice, depth-sensitive sequencing
-- Automated small rebalances with strict policy enforcement
-- Funding regime forecasting (OI + momentum model)
-- Full Postgres migration for all historical data
-- Prometheus + Grafana observability stack
+### V2 — Yield expansion + automation ✅ Started
 
-### V3 — Institutional polish + white-label readiness
+- ✅ Liquidity Inefficiency Engine (spread blowout, thin book, cascade proxy)
+- ✅ Transfer Policy Engine (allowlist, tamper detection, velocity limits)
+- ✅ Exchange incident safety (ADL risk, liquidation clusters, venue deleveraging)
+- ❌ Smarter execution: IOC/limit choice, depth-sensitive sequencing
+- ❌ Automated rebalances (transfer policy wired into compose + dashboard)
+- ❌ Funding regime forecasting (OI + momentum model)
+- ❌ Prometheus + Grafana observability stack
 
-- Multi-tenant UI branding + isolated API keys per tenant
-- RBAC: admin / trader / viewer / auditor roles
-- Advanced reporting: client-ready PDF/CSV exports
-- Optional DEX spot leg routing via 1inch/Paraswap (with MEV protection)
-- Optional L2 transfers (Arbitrum, Optimism) for gas efficiency
-- SOC2-style audit trail export
+### V3 — Institutional polish + white-label readiness ✅ ~85% complete
+
+- ✅ Multi-tenant UI branding + isolated API keys per tenant
+- ✅ RBAC: admin / trader / viewer / auditor roles
+- ✅ Advanced reporting: client-ready CSV exports (fills + PnL + audit)
+- ✅ Optional DEX spot leg routing via 1inch/Paraswap (with MEV protection) — disabled by default
+- ✅ Optional L2 transfers (Arbitrum, Optimism, Base) for gas efficiency — disabled by default
+- ✅ SOC2-style audit trail export (immutable append-only, time-ranged CSV)
+- ❌ PDF export (CSV only currently)
+- ❌ Collateral Manager (DeFi borrow/lend loops)
 
 ---
 
 ## 7. Deployment stack
 
-### V1 target: Docker Compose
+### V1 target: Docker Compose ✅
 
-Missing: `docker-compose.yaml`
+All services present in `docker-compose.yaml`:
 
-Required services:
 ```yaml
 services:
-  redis:          # Redis 7, streams enabled
-  postgres:       # Postgres 16
-  market-data:    # cmd/market-data
-  consensus:      # cmd/consensus-engine     (Dockerfile.consensus-engine exists)
-  arb-engine:     # cmd/arb-opportunity-engine
-  funding-engine: # cmd/funding-engine
-  execution:      # cmd/execution-router
-  risk-daemon:    # cmd/risk-daemon
-  ledger:         # cmd/ledger
-  paper-trader:   # cmd/paper-trader
-  allocator:      # cmd/capital-allocator
-  gateway:        # cmd/gateway (or extend dashboard)
+  redis:          ✅ Redis 7, streams enabled
+  postgres:       ✅ Postgres 16
+  market-data:    ✅ cmd/market-data
+  consensus:      ✅ cmd/consensus-engine
+  arb-engine:     ✅ cmd/arb-opportunity-engine
+  funding-engine: ✅ cmd/funding-engine
+  execution:      ✅ cmd/execution-router
+  risk-daemon:    ✅ cmd/risk-daemon
+  ledger:         ✅ cmd/ledger
+  paper-trader:   ✅ cmd/paper-trader
+  allocator:      ✅ cmd/capital-allocator
+  gateway:        ✅ cmd/dashboard (extends with gateway)
+  # TODO: transfer-policy  — cmd/transfer-policy not yet in compose
   dashboard:      # cmd/dashboard             (Dockerfile exists)
 ```
 
