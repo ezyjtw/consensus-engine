@@ -11,6 +11,8 @@
   --text:#e2e8f0;--muted:#64748b;--accent:#3b82f6;--accent2:#1d4ed8;
   --green:#10b981;--yellow:#f59e0b;--red:#ef4444;--orange:#f97316;
   --mono:'Courier New',monospace;
+  /* V3 branding vars — overridden by /api/tenant/branding at runtime */
+  --brand-primary:#3b82f6;--brand-accent:#f97316;--brand-name:'CONSENSUS';
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px}
 
@@ -244,6 +246,30 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
 .btn-warn:hover{background:rgba(245,158,11,.25)}
 .btn-danger{background:rgba(239,68,68,.12);border-color:var(--red);color:var(--red)}
 .btn-danger:hover{background:rgba(239,68,68,.25)}
+.btn-export{background:rgba(59,130,246,.1);border-color:var(--accent);color:var(--accent);padding:4px 10px;font-size:10px}
+.btn-export:hover{background:rgba(59,130,246,.25)}
+
+/* ── V3: role badge ─────────────────────────────────────────── */
+.role-badge{
+  padding:2px 8px;border-radius:3px;font-size:10px;letter-spacing:.08em;
+  background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:var(--accent);
+  text-transform:uppercase;
+}
+.role-badge.admin{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3);color:var(--red)}
+.role-badge.trader{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.3);color:var(--yellow)}
+.role-badge.viewer{background:rgba(100,116,139,.12);border-color:rgba(100,116,139,.3);color:var(--muted)}
+.role-badge.auditor{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.3);color:var(--green)}
+
+/* ── V3: API key table ──────────────────────────────────────── */
+.apikey-new-key{
+  word-break:break-all;background:var(--bg);border:1px solid var(--green);
+  color:var(--green);padding:8px 10px;border-radius:4px;font-size:11px;
+  margin-top:10px;display:none;
+}
+
+/* admin-only sections hidden by default; JS reveals them */
+.admin-only{display:none}
+.trader-up{display:none}
 
 </style>
 </head>
@@ -266,13 +292,16 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
   <!-- top bar -->
   <div class="topbar">
     <div class="topbar-left">
-      <span class="logo">⬡ CONSENSUS</span>
+      <span class="logo" id="brand-name">⬡ CONSENSUS</span>
       <div id="kill-badge" class="kill-badge inactive">
         <span class="kill-dot"></span>
         <span id="kill-badge-text">ENGINE ACTIVE</span>
       </div>
     </div>
-    <div class="conn-indicator" id="sse-status">◌ connecting...</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span id="role-badge" class="role-badge" style="display:none"></span>
+      <div class="conn-indicator" id="sse-status">◌ connecting...</div>
+    </div>
   </div>
 
   <!-- tab bar -->
@@ -286,6 +315,8 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
     <div class="tab" data-tab="positions" onclick="switchTab('positions')">POSITIONS</div>
     <div class="tab" data-tab="funding" onclick="switchTab('funding')">FUNDING</div>
     <div class="tab" data-tab="orders" onclick="switchTab('orders')">ORDERS</div>
+    <div class="tab" data-tab="audit" onclick="switchTab('audit')">AUDIT</div>
+    <div class="tab admin-only" data-tab="apikeys" onclick="switchTab('apikeys')">API KEYS</div>
   </div>
 
   <!-- ─── LIVE ────────────────────────────────────────────── -->
@@ -428,6 +459,8 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
 // ═══════════════════════════════════════════════════════
 const S = {
   token: '',
+  role: 'viewer',       // populated from /api/auth/me after login
+  tenantName: 'CONSENSUS',
   // per-symbol: { consensus: {...}, venues: [...] }
   data: {},
   anomalies: [],
@@ -468,12 +501,76 @@ function authHeaders(tok) {
 // ═══════════════════════════════════════════════════════
 // Boot
 // ═══════════════════════════════════════════════════════
-function boot() {
+async function boot() {
   document.getElementById('login').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
+  // V3: fetch role and branding concurrently.
+  await Promise.allSettled([fetchRole(), fetchBranding()]);
   connectSSE();
   loadConnections();
   loadAlerts();
+}
+
+async function fetchRole() {
+  try {
+    const r = await fetch('/api/auth/me', { headers: authHeaders() });
+    if (!r.ok) return;
+    const d = await r.json();
+    S.role = d.role || 'viewer';
+    applyRole(S.role);
+  } catch(e) { /* non-fatal */ }
+}
+
+async function fetchBranding() {
+  try {
+    const r = await fetch('/api/tenant/branding', { headers: authHeaders() });
+    if (!r.ok) return;
+    applyBranding(await r.json());
+  } catch(e) { /* non-fatal */ }
+}
+
+function applyBranding(b) {
+  if (!b) return;
+  const root = document.documentElement.style;
+  if (b.primary_color) root.setProperty('--accent', b.primary_color);
+  if (b.accent_color)  root.setProperty('--orange', b.accent_color);
+  const name = b.name || 'CONSENSUS';
+  S.tenantName = name;
+  document.getElementById('brand-name').textContent = '⬡ ' + name;
+  document.title = name + ' — Dashboard';
+  // Pre-fill branding form if it exists.
+  const ni = document.getElementById('brand-name-input');
+  if (ni) ni.value = name;
+  const li = document.getElementById('brand-logo');
+  if (li) li.value = b.logo_url || '';
+  const pi = document.getElementById('brand-primary-hex');
+  if (pi) { pi.value = b.primary_color || '#3b82f6'; document.getElementById('brand-primary').value = pi.value; }
+  const ai = document.getElementById('brand-accent-hex');
+  if (ai) { ai.value = b.accent_color || '#f97316'; document.getElementById('brand-accent').value = ai.value; }
+}
+
+function applyRole(role) {
+  // Show role badge.
+  const badge = document.getElementById('role-badge');
+  if (badge) {
+    badge.textContent = role.toUpperCase();
+    badge.className = 'role-badge ' + role;
+    badge.style.display = '';
+  }
+  // Show admin-only elements (tabs, sections).
+  const isAdmin = role === 'admin';
+  const isTraderUp = role === 'admin' || role === 'trader';
+  document.querySelectorAll('.admin-only').forEach(el => {
+    if (el.tagName === 'DIV' && el.id && el.id.startsWith('tab-')) {
+      el.style.display = 'none'; // tabs themselves hidden via tab switching
+    } else {
+      el.style.display = isAdmin ? '' : 'none';
+    }
+  });
+  // Show admin tabs in tab bar.
+  document.querySelectorAll('.tab.admin-only').forEach(el => {
+    el.style.display = isAdmin ? '' : 'none';
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -481,8 +578,9 @@ function boot() {
 // ═══════════════════════════════════════════════════════
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-  ['live','connections','kill','alerts','risk','pnl','positions','funding','orders'].forEach(t => {
-    document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
+  ['live','connections','kill','alerts','risk','pnl','positions','funding','orders','audit','apikeys'].forEach(t => {
+    const el = document.getElementById('tab-' + t);
+    if (el) el.style.display = t === name ? '' : 'none';
   });
   if (name === 'connections') loadConnections();
   if (name === 'alerts') loadAlerts();
@@ -491,6 +589,8 @@ function switchTab(name) {
   if (name === 'positions') loadPositions();
   if (name === 'funding') loadFunding();
   if (name === 'orders') loadOrders();
+  if (name === 'audit') loadAudit();
+  if (name === 'apikeys') loadAPIKeys();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1092,6 +1192,139 @@ function fmtUSD(v) {
 }
 
 // ═══════════════════════════════════════════════════════
+// V3: CSV export helpers
+// ═══════════════════════════════════════════════════════
+function exportCSV(type) {
+  const url = '/api/reports/' + type + '?' + new URLSearchParams({ token: S.token });
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = type + '_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function exportAuditCSV() {
+  const from = document.getElementById('audit-from').value;
+  const to   = document.getElementById('audit-to').value;
+  const params = { token: S.token };
+  if (from) params.from = from;
+  if (to)   params.to   = to;
+  const url = '/api/audit/export?' + new URLSearchParams(params);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'audit_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ═══════════════════════════════════════════════════════
+// V3: Audit tab
+// ═══════════════════════════════════════════════════════
+async function loadAudit() {
+  const tbody = document.getElementById('audit-tbody');
+  if (!tbody) return;
+  const from = document.getElementById('audit-from').value;
+  const to   = document.getElementById('audit-to').value;
+  const params = { limit: 200 };
+  if (from) params.from = from;
+  if (to)   params.to   = to;
+  try {
+    const r = await fetch('/api/audit?' + new URLSearchParams(params), { headers: authHeaders() });
+    if (!r.ok) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Unavailable (auditor role required).</td></tr>'; return; }
+    const rows = await r.json();
+    if (!Array.isArray(rows) || !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No audit entries.</td></tr>'; return;
+    }
+    tbody.innerHTML = rows.map(e => `<tr>
+      <td>${escHtml(String(e.ts||''))}</td>
+      <td>${escHtml(String(e.actor||''))}</td>
+      <td><span class="role-badge ${escHtml(String(e.role||''))}">${escHtml(String(e.role||''))}</span></td>
+      <td>${escHtml(String(e.ip_address||''))}</td>
+      <td>${escHtml(String(e.action||''))}</td>
+      <td style="color:var(--muted);font-size:10px;max-width:300px;overflow:hidden;text-overflow:ellipsis">${escHtml(String(e.payload||''))}</td>
+    </tr>`).join('');
+  } catch(e) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Error loading audit log.</td></tr>'; }
+}
+
+// ═══════════════════════════════════════════════════════
+// V3: API keys tab
+// ═══════════════════════════════════════════════════════
+async function loadAPIKeys() {
+  const tbody = document.getElementById('apikeys-tbody');
+  if (!tbody) return;
+  try {
+    const r = await fetch('/api/auth/keys', { headers: authHeaders() });
+    if (!r.ok) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Admin access required.</td></tr>'; return; }
+    const keys = await r.json();
+    if (!Array.isArray(keys) || !keys.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No API keys yet.</td></tr>'; return;
+    }
+    tbody.innerHTML = keys.map(k => `<tr>
+      <td>${escHtml(String(k.name||''))}</td>
+      <td style="font-family:var(--mono);color:var(--muted)">${escHtml(String(k.key_prefix||''))}…</td>
+      <td><span class="role-badge ${escHtml(String(k.role||''))}">${escHtml(String(k.role||''))}</span></td>
+      <td>${escHtml(String(k.created_at||'').slice(0,10))}</td>
+      <td>${k.last_used_at ? escHtml(String(k.last_used_at).slice(0,10)) : '<span style="color:var(--muted)">never</span>'}</td>
+      <td><button class="btn-sm btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteAPIKey('${escHtml(String(k.id||''))}')">DELETE</button></td>
+    </tr>`).join('');
+  } catch(e) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Error loading keys.</td></tr>'; }
+}
+
+async function createAPIKey() {
+  const name = document.getElementById('newkey-name').value.trim();
+  const role = document.getElementById('newkey-role').value;
+  const resultEl = document.getElementById('newkey-result');
+  if (!name) { alert('Name is required.'); return; }
+  try {
+    const r = await fetch('/api/auth/keys', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, role }),
+    });
+    const d = await r.json();
+    if (!r.ok) { alert('Error: ' + (d.error || r.status)); return; }
+    resultEl.style.display = '';
+    resultEl.innerHTML = '<b>Key created — copy now, it will not be shown again:</b><br><br>' + escHtml(d.key);
+    document.getElementById('newkey-name').value = '';
+    loadAPIKeys();
+  } catch(e) { alert('Error: ' + e); }
+}
+
+async function deleteAPIKey(id) {
+  if (!confirm('Delete this API key? This cannot be undone.')) return;
+  try {
+    const r = await fetch('/api/auth/keys/' + encodeURIComponent(id), {
+      method: 'DELETE', headers: authHeaders(),
+    });
+    if (!r.ok) { const d = await r.json(); alert('Error: ' + (d.error || r.status)); return; }
+    loadAPIKeys();
+  } catch(e) { alert('Error: ' + e); }
+}
+
+async function saveBranding() {
+  const name         = document.getElementById('brand-name-input').value.trim();
+  const logo_url     = document.getElementById('brand-logo').value.trim();
+  const primary_color = document.getElementById('brand-primary-hex').value.trim() ||
+                        document.getElementById('brand-primary').value;
+  const accent_color  = document.getElementById('brand-accent-hex').value.trim() ||
+                        document.getElementById('brand-accent').value;
+  try {
+    const r = await fetch('/api/tenant/branding', {
+      method: 'PUT',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, logo_url, primary_color, accent_color }),
+    });
+    if (!r.ok) { const d = await r.json(); alert('Error: ' + (d.error || r.status)); return; }
+    applyBranding({ name, logo_url, primary_color, accent_color });
+    const msg = document.getElementById('brand-save-msg');
+    msg.classList.add('show');
+    setTimeout(() => msg.classList.remove('show'), 2500);
+  } catch(e) { alert('Error: ' + e); }
+}
+
+// ═══════════════════════════════════════════════════════
 // Auto-login from sessionStorage on page load
 // ═══════════════════════════════════════════════════════
 (async () => {
@@ -1142,7 +1375,13 @@ function fmtUSD(v) {
   <div id="tab-pnl" class="content" style="display:none">
     <div class="section-grid">
       <div class="card">
-        <div class="card-title">P&amp;L by Strategy</div>
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          P&amp;L by Strategy
+          <div style="display:flex;gap:8px">
+            <button class="btn-sm btn-export" onclick="exportCSV('pnl')">↓ PNL CSV</button>
+            <button class="btn-sm btn-export" onclick="exportCSV('fills')">↓ FILLS CSV</button>
+          </div>
+        </div>
         <table id="pnl-table">
           <thead><tr><th>Strategy</th><th>Total P&amp;L</th><th>Fills</th><th>Fees</th></tr></thead>
           <tbody id="pnl-tbody"><tr><td colspan="4" class="empty-state">Loading…</td></tr></tbody>
@@ -1192,6 +1431,78 @@ function fmtUSD(v) {
         <thead><tr><th>Time</th><th>Strategy</th><th>Symbol</th><th>Action</th><th>Venue</th><th>Filled USD</th><th>Fill Price</th><th>Slip (bps)</th><th>Status</th></tr></thead>
         <tbody id="orders-tbody"><tr><td colspan="9" class="empty-state">Loading…</td></tr></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ─── AUDIT (V3) ────────────────────────────────────── -->
+  <div id="tab-audit" class="content" style="display:none">
+    <div class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        Audit Trail
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="date" id="audit-from" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:3px;font-family:var(--mono);font-size:11px">
+          <span style="color:var(--muted);font-size:11px">to</span>
+          <input type="date" id="audit-to" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:3px;font-family:var(--mono);font-size:11px">
+          <button class="btn-sm btn-export" onclick="loadAudit()">REFRESH</button>
+          <button class="btn-sm btn-export" onclick="exportAuditCSV()">&#8595; EXPORT CSV</button>
+        </div>
+      </div>
+      <table id="audit-table">
+        <thead><tr><th>Time</th><th>Actor</th><th>Role</th><th>IP</th><th>Action</th><th>Payload</th></tr></thead>
+        <tbody id="audit-tbody"><tr><td colspan="6" class="empty-state">Loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ─── API KEYS (V3 admin only) ─────────────────────── -->
+  <div id="tab-apikeys" class="content admin-only" style="display:none">
+    <div class="section-grid">
+      <div class="card">
+        <div class="card-title">Create API Key</div>
+        <label style="font-size:11px;color:var(--muted)">Name</label>
+        <input id="newkey-name" type="text" placeholder="e.g. read-only dashboard" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:4px;font-family:var(--mono);font-size:12px;margin:6px 0 10px">
+        <label style="font-size:11px;color:var(--muted)">Role</label>
+        <select id="newkey-role" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:4px;font-family:var(--mono);font-size:12px;margin:6px 0 14px">
+          <option value="viewer">viewer &mdash; read-only</option>
+          <option value="auditor">auditor &mdash; audit trail access</option>
+          <option value="trader">trader &mdash; can change modes</option>
+          <option value="admin">admin &mdash; full access</option>
+        </select>
+        <button class="btn-sm btn-ok" onclick="createAPIKey()">CREATE KEY</button>
+        <div id="newkey-result" class="apikey-new-key"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Active API Keys</div>
+        <table id="apikeys-table">
+          <thead><tr><th>Name</th><th>Prefix</th><th>Role</th><th>Created</th><th>Last Used</th><th></th></tr></thead>
+          <tbody id="apikeys-tbody"><tr><td colspan="6" class="empty-state">Loading&hellip;</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Tenant Branding</div>
+      <div class="section-grid">
+        <div>
+          <label style="font-size:11px;color:var(--muted)">Display Name</label>
+          <input id="brand-name-input" type="text" placeholder="ArbSuite" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-family:var(--mono);font-size:12px;margin:4px 0 10px">
+          <label style="font-size:11px;color:var(--muted)">Logo URL (optional)</label>
+          <input id="brand-logo" type="text" placeholder="https://..." style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-family:var(--mono);font-size:12px;margin:4px 0 10px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted)">Primary Color</label>
+          <div style="display:flex;gap:8px;align-items:center;margin:4px 0 10px">
+            <input id="brand-primary" type="color" value="#3b82f6" style="width:36px;height:30px;border:none;background:none;cursor:pointer" oninput="document.getElementById('brand-primary-hex').value=this.value">
+            <input id="brand-primary-hex" type="text" placeholder="#3b82f6" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-family:var(--mono);font-size:12px">
+          </div>
+          <label style="font-size:11px;color:var(--muted)">Accent Color</label>
+          <div style="display:flex;gap:8px;align-items:center;margin:4px 0 10px">
+            <input id="brand-accent" type="color" value="#f97316" style="width:36px;height:30px;border:none;background:none;cursor:pointer" oninput="document.getElementById('brand-accent-hex').value=this.value">
+            <input id="brand-accent-hex" type="text" placeholder="#f97316" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-family:var(--mono);font-size:12px">
+          </div>
+        </div>
+      </div>
+      <button class="btn-sm btn-ok" onclick="saveBranding()" style="margin-top:4px">SAVE BRANDING</button>
+      <span class="save-msg" id="brand-save-msg" style="margin-left:12px">Saved</span>
     </div>
   </div>
 

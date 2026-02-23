@@ -1,0 +1,19 @@
+# DEX spot-leg routing configuration (V3 optional feature)
+# When enabled, the execution router may route spot legs through a DEX aggregator
+# instead of a centralised venue. MEV protection uses 1inch Fusion private order flow.
+
+enabled: false                    # set true to activate DEX routing
+
+preferred_provider: "1inch"       # "1inch" or "paraswap" — fallback to other on error
+
+one_inch_api_key: ""              # obtain from https://portal.1inch.dev
+paraswap_api_key: ""              # optional; Paraswap public API works without a key
+
+default_chain_id: 42161           # 1=Ethereum mainnet, 42161=Arbitrum, 10=Optimism
+
+max_slippage_pct: 0.5             # reject swaps with slippage above 0.5%
+max_price_impact_pct: 1.0         # reject quotes with price impact above 1%
+
+mev_protect: true                 # route through MEV-protected pools / 1inch Fusion
+
+gas_limit_multiplier: 1.2         # add 20% headroom to estimated gas
