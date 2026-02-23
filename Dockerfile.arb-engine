@@ -3,12 +3,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /arb-engine ./cmd/arb-opportunity-engine
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /arb-engine ./cmd/arb-opportunity-engine
 
-FROM alpine:3.19
-RUN apk --no-cache add ca-certificates tzdata
-WORKDIR /app
-COPY --from=builder /arb-engine /app/arb-engine
-COPY configs/ /app/configs/
-ENV REDIS_ADDR="redis:6379"
-ENTRYPOINT ["/app/arb-engine", "-config", "/app/configs/policies/arb_engine.yaml"]
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /arb-engine /arb-engine
+COPY configs/ /configs/
+ENTRYPOINT ["/arb-engine", "-config", "/configs/policies/arb_engine.yaml"]

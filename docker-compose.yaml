@@ -61,7 +61,7 @@ services:
     environment:
       <<: *common-env
     volumes:
-      - ./configs/market_data.yaml:/app/configs/market_data.yaml:ro
+      - ./configs/market_data.yaml:/configs/market_data.yaml:ro
 
   # ── Engines ─────────────────────────────────────────────────────────────
   consensus:
@@ -75,7 +75,7 @@ services:
     environment:
       <<: *common-env
     volumes:
-      - ./configs/policies/consensus_policy.yaml:/app/configs/policies/consensus_policy.yaml:ro
+      - ./configs/policies/consensus_policy.yaml:/configs/policies/consensus_policy.yaml:ro
 
   arb-engine:
     build:
@@ -88,7 +88,7 @@ services:
     environment:
       <<: *common-env
     volumes:
-      - ./configs/policies/arb_engine.yaml:/app/configs/policies/arb_engine.yaml:ro
+      - ./configs/policies/arb_engine.yaml:/configs/policies/arb_engine.yaml:ro
 
   funding-engine:
     build:
@@ -101,7 +101,7 @@ services:
     environment:
       <<: *common-env
     volumes:
-      - ./configs/policies/funding_engine.yaml:/app/configs/policies/funding_engine.yaml:ro
+      - ./configs/policies/funding_engine.yaml:/configs/policies/funding_engine.yaml:ro
 
   # ── Capital management ──────────────────────────────────────────────────
   capital-allocator:
@@ -115,7 +115,7 @@ services:
     environment:
       <<: *common-env
     volumes:
-      - ./configs/policies/allocator.yaml:/app/configs/policies/allocator.yaml:ro
+      - ./configs/policies/allocator.yaml:/configs/policies/allocator.yaml:ro
 
   # ── Execution ───────────────────────────────────────────────────────────
   execution-router:
@@ -130,7 +130,7 @@ services:
       <<: *common-env
       TRADING_MODE: "PAPER"  # override with SHADOW or LIVE
     volumes:
-      - ./configs/execution_router.yaml:/app/configs/execution_router.yaml:ro
+      - ./configs/execution_router.yaml:/configs/execution_router.yaml:ro
 
   # ── Risk & safety ───────────────────────────────────────────────────────
   risk-daemon:
@@ -144,7 +144,7 @@ services:
     environment:
       <<: *common-env
     volumes:
-      - ./configs/policies/risk.yaml:/app/configs/policies/risk.yaml:ro
+      - ./configs/policies/risk.yaml:/configs/policies/risk.yaml:ro
 
   # ── Ledger ──────────────────────────────────────────────────────────────
   ledger:

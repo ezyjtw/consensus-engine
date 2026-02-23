@@ -1,25 +1,11 @@
 FROM golang:1.24-alpine AS builder
-
 WORKDIR /app
-
 COPY go.mod go.sum ./
 RUN go mod download
-
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /market-data ./cmd/market-data
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /market-data ./cmd/market-data
 
-# ── Runtime image ──────────────────────────────────────────────────────────
-FROM alpine:3.19
-
-RUN apk --no-cache add ca-certificates tzdata
-
-WORKDIR /app
-
-COPY --from=builder /market-data /app/market-data
-COPY configs/market_data.yaml /app/configs/market_data.yaml
-
-# Environment variable overrides (values set at runtime via docker-compose or k8s).
-# REDIS_ADDR, REDIS_PASSWORD, REDIS_TLS are read by the config loader.
-ENV REDIS_ADDR="redis:6379"
-
-ENTRYPOINT ["/app/market-data", "-config", "/app/configs/market_data.yaml"]
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /market-data /market-data
+COPY configs/market_data.yaml /configs/market_data.yaml
+ENTRYPOINT ["/market-data", "-config", "/configs/market_data.yaml"]
