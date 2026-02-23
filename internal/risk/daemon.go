@@ -13,8 +13,8 @@ type Daemon struct {
 	state  State
 
 	// Rolling execution error rate tracking (5-minute window).
-	errorEvents  []int64 // unix ms timestamps of errors
-	totalEvents  []int64 // unix ms timestamps of all fills
+	errorEvents []int64 // unix ms timestamps of errors
+	totalEvents []int64 // unix ms timestamps of all fills
 
 	// Blacklisted venues from consensus anomaly stream.
 	blacklisted map[string]int64 // venue → blacklist expiry ms
@@ -22,12 +22,26 @@ type Daemon struct {
 	// Equity tracking.
 	peakEquity    float64
 	currentEquity float64
+
+	// ── Exchange incident safety tracking ─────────────────────────────────
+
+	// ADL risk: a per-venue signal that insurance fund is thin.
+	// Stored as venue → last-reported risk pct (0–100).
+	adlRiskByVenue map[string]float64
+
+	// Liquidation clusters: price levels where liquidations concentrate.
+	// We track a rolling count updated via RecordLiqCluster.
+	liqClusterCount int
+
+	// Venue-wide deleveraging events (mass ADL) with timestamps.
+	delevEvents []int64 // unix ms timestamps
 }
 
 func NewDaemon(policy *Policy) *Daemon {
 	return &Daemon{
-		policy:      policy,
-		blacklisted: make(map[string]int64),
+		policy:         policy,
+		blacklisted:    make(map[string]int64),
+		adlRiskByVenue: make(map[string]float64),
 		state: State{
 			TenantID: policy.TenantID,
 			Mode:     ModeRunning,
@@ -64,6 +78,10 @@ func (d *Daemon) CurrentState() State {
 		}
 	}
 	s.BlacklistedVenues = bl
+	// Exchange incident metrics.
+	s.ADLRiskPct = d.maxADLRisk()
+	s.LiqClusterRisk = d.liqClusterCount
+	s.VenueDelevEventCount = d.countDelevEvents(now)
 	return s
 }
 
@@ -94,6 +112,34 @@ func (d *Daemon) RecordBlacklist(venue string, ttlMs int64) []Alert {
 	return d.evaluate()
 }
 
+// RecordADLRisk updates the ADL risk reading for a specific venue.
+// riskPct is in 0–100. This should be called whenever a venue publishes an
+// insurance fund update or OI spike signal.
+func (d *Daemon) RecordADLRisk(venue string, riskPct float64) []Alert {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.adlRiskByVenue[venue] = riskPct
+	return d.evaluate()
+}
+
+// RecordLiqCluster updates the current liquidation cluster count.
+// count is the number of price levels within the configured window that
+// each hold enough liquidation notional to move price meaningfully.
+func (d *Daemon) RecordLiqCluster(count int) []Alert {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.liqClusterCount = count
+	return d.evaluate()
+}
+
+// RecordVenueDelevEvent records a venue-wide mass-ADL/deleveraging event.
+func (d *Daemon) RecordVenueDelevEvent() []Alert {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.delevEvents = append(d.delevEvents, time.Now().UnixMilli())
+	return d.evaluate()
+}
+
 // SetMode forces a mode transition (from kill switch / dashboard command).
 func (d *Daemon) SetMode(m Mode, reason string) {
 	d.mu.Lock()
@@ -110,16 +156,19 @@ func (d *Daemon) Tick() []Alert {
 	return d.evaluate()
 }
 
+// ── Internal evaluation ───────────────────────────────────────────────────
+
 // evaluate applies all risk rules and transitions mode accordingly.
 // Must be called with d.mu held.
 func (d *Daemon) evaluate() []Alert {
 	var alerts []Alert
 	now := time.Now().UnixMilli()
 
-	// Prune event windows older than 5 minutes.
-	window := int64(5 * 60 * 1000)
-	d.errorEvents = pruneOlderThan(d.errorEvents, now-window)
-	d.totalEvents = pruneOlderThan(d.totalEvents, now-window)
+	// Prune event windows.
+	window5m := int64(5 * 60 * 1000)
+	d.errorEvents = pruneOlderThan(d.errorEvents, now-window5m)
+	d.totalEvents = pruneOlderThan(d.totalEvents, now-window5m)
+	d.delevEvents = pruneOlderThan(d.delevEvents, now-d.policy.VenueDelevWindowMs)
 
 	// Error rate.
 	errorRate := 0.0
@@ -142,6 +191,14 @@ func (d *Daemon) evaluate() []Alert {
 			blacklistCount++
 		}
 	}
+
+	// Exchange incident metrics (for state snapshot).
+	adlRisk := d.maxADLRisk()
+	liqClusters := d.liqClusterCount
+	delevCount := d.countDelevEvents(now)
+	d.state.ADLRiskPct = adlRisk
+	d.state.LiqClusterRisk = liqClusters
+	d.state.VenueDelevEventCount = delevCount
 
 	// ── Mode transitions ───────────────────────────────────────────────────
 	// Only escalate — don't automatically de-escalate (requires operator action).
@@ -172,6 +229,16 @@ func (d *Daemon) evaluate() []Alert {
 			newMode = ModeSafe
 		}
 	}
+	// Exchange incident: venue-wide deleveraging → SAFE MODE.
+	if delevCount >= d.policy.VenueDelevSafeModeCount {
+		alerts = append(alerts, d.alert("CRITICAL",
+			"venue_deleveraging_event",
+			"Multiple venue-wide deleveraging events detected", "delev_event_count",
+			float64(delevCount), float64(d.policy.VenueDelevSafeModeCount)))
+		if modeRank(newMode) < modeRank(ModeSafe) {
+			newMode = ModeSafe
+		}
+	}
 
 	// PAUSED triggers.
 	if drawdown >= d.policy.MaxDrawdownPct && modeRank(newMode) < modeRank(ModePaused) {
@@ -188,6 +255,24 @@ func (d *Daemon) evaluate() []Alert {
 			errorRate, d.policy.MaxErrorRate5mPct))
 		newMode = ModePaused
 	}
+	// Exchange incident: high ADL risk → PAUSED.
+	if adlRisk >= d.policy.ADLRiskPausePct && modeRank(newMode) < modeRank(ModePaused) {
+		alerts = append(alerts, d.alert("WARN",
+			"adl_risk_elevated",
+			"ADL risk elevated — venue insurance fund thin or OI spike", "adl_risk_pct",
+			adlRisk, d.policy.ADLRiskPausePct))
+		newMode = ModePaused
+	}
+	// Exchange incident: dense liquidation clusters → PAUSED.
+	if d.policy.LiqClusterPauseCount > 0 &&
+		liqClusters >= d.policy.LiqClusterPauseCount &&
+		modeRank(newMode) < modeRank(ModePaused) {
+		alerts = append(alerts, d.alert("WARN",
+			"liquidation_cluster_dense",
+			"Dense liquidation clusters near current price — cascade risk", "liq_cluster_count",
+			float64(liqClusters), float64(d.policy.LiqClusterPauseCount)))
+		newMode = ModePaused
+	}
 
 	if newMode != currentMode {
 		log.Printf("risk-daemon: auto-transition %s → %s", currentMode, newMode)
@@ -195,6 +280,24 @@ func (d *Daemon) evaluate() []Alert {
 	}
 
 	return alerts
+}
+
+// maxADLRisk returns the highest ADL risk reading across all venues.
+// Must be called with d.mu held.
+func (d *Daemon) maxADLRisk() float64 {
+	var max float64
+	for _, r := range d.adlRiskByVenue {
+		if r > max {
+			max = r
+		}
+	}
+	return max
+}
+
+// countDelevEvents returns the count of deleveraging events in the rolling window.
+// Must be called with d.mu held (delevEvents already pruned by evaluate).
+func (d *Daemon) countDelevEvents(_ int64) int {
+	return len(d.delevEvents)
 }
 
 func (d *Daemon) alert(severity, source, msg, metric string, value, threshold float64) Alert {

@@ -271,6 +271,128 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
 .admin-only{display:none}
 .trader-up{display:none}
 
+/* ── cockpit bar (always visible, fixed bottom on mobile) ──── */
+#cockpit-bar{
+  display:none; /* shown only on mobile via media query */
+  position:fixed;bottom:0;left:0;right:0;z-index:100;
+  background:var(--surface);border-top:1px solid var(--border);
+  padding:8px 16px;
+  align-items:center;justify-content:space-between;
+  height:52px;
+}
+.cockpit-mode{
+  display:flex;align-items:center;gap:8px;
+}
+.cockpit-mode-pill{
+  padding:4px 12px;border-radius:20px;font-size:12px;font-weight:bold;
+  letter-spacing:.08em;border:1px solid;
+}
+.cockpit-mode-pill.RUNNING{background:rgba(16,185,129,.15);border-color:var(--green);color:var(--green)}
+.cockpit-mode-pill.PAUSED{background:rgba(245,158,11,.15);border-color:var(--yellow);color:var(--yellow)}
+.cockpit-mode-pill.SAFE{background:rgba(249,115,22,.15);border-color:var(--orange);color:var(--orange)}
+.cockpit-mode-pill.FLATTEN{background:rgba(239,68,68,.15);border-color:var(--red);color:var(--red)}
+.cockpit-mode-pill.HALTED{background:rgba(239,68,68,.25);border-color:var(--red);color:var(--red)}
+.cockpit-pnl{font-size:13px;font-weight:bold;color:var(--green)}
+.cockpit-right{display:flex;align-items:center;gap:10px}
+
+/* ── mobile bottom nav ─────────────────────────────────────── */
+#mobile-nav{
+  display:none;
+  position:fixed;bottom:52px;left:0;right:0;z-index:99;
+  background:var(--surface);border-top:1px solid var(--border);
+  flex-direction:row;justify-content:space-around;align-items:center;
+  height:48px;
+}
+.mobile-nav-btn{
+  display:flex;flex-direction:column;align-items:center;
+  color:var(--muted);font-size:9px;letter-spacing:.06em;
+  cursor:pointer;padding:4px 10px;border:none;background:none;
+  font-family:var(--mono);gap:2px;
+}
+.mobile-nav-btn .nav-icon{font-size:16px;line-height:1}
+.mobile-nav-btn.active{color:var(--accent)}
+
+@media(max-width:768px){
+  #cockpit-bar{display:flex}
+  #mobile-nav{display:flex}
+  .tabs{display:none}
+  .content{padding:12px 10px;padding-bottom:110px}
+  .section-grid{grid-template-columns:1fr}
+  .consensus-grid{grid-template-columns:1fr 1fr}
+}
+
+/* ── home / operator view ──────────────────────────────────── */
+.home-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.home-grid{grid-template-columns:1fr}}
+
+.mode-card{
+  border-radius:8px;padding:20px;
+  border:2px solid;position:relative;overflow:hidden;
+}
+.mode-card::before{
+  content:'';position:absolute;inset:0;opacity:.05;
+  background:currentColor;
+}
+.mode-card-mode{font-size:28px;font-weight:bold;letter-spacing:.1em;margin-bottom:4px}
+.mode-card-reason{font-size:11px;color:var(--muted);margin-bottom:14px;min-height:14px}
+.mode-card-btns{display:flex;gap:6px;flex-wrap:wrap}
+
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(30,45,69,.5)}
+.stat-row:last-child{border-bottom:none}
+.stat-label{font-size:11px;color:var(--muted);letter-spacing:.07em}
+.stat-val{font-size:13px;font-weight:bold}
+
+/* ── risk light / RAG indicator ────────────────────────────── */
+.rag-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px}
+.rag{
+  border-radius:6px;padding:10px;text-align:center;
+  border:1px solid;
+}
+.rag-label{font-size:9px;letter-spacing:.08em;color:var(--muted);margin-bottom:4px}
+.rag-val{font-size:15px;font-weight:bold}
+.rag.green{border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.07)}
+.rag.yellow{border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.07)}
+.rag.red{border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.07)}
+
+/* ── timeline ───────────────────────────────────────────────── */
+.timeline-list{list-style:none}
+.tl-item{
+  display:flex;gap:12px;padding:10px 0;
+  border-bottom:1px solid rgba(30,45,69,.5);
+}
+.tl-item:last-child{border-bottom:none}
+.tl-dot{
+  width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:3px;
+}
+.tl-dot.risk_alert{background:var(--red)}
+.tl-dot.execution{background:var(--green)}
+.tl-dot.anomaly{background:var(--yellow)}
+.tl-dot.mode_change{background:var(--accent)}
+.tl-body{flex:1;min-width:0}
+.tl-kind{
+  font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:2px;
+}
+.tl-msg{font-size:12px;line-height:1.4;word-break:break-word}
+.tl-ts{font-size:10px;color:var(--muted);margin-top:2px}
+
+/* ── confidence gauge ───────────────────────────────────────── */
+.conf-score{
+  font-size:48px;font-weight:bold;letter-spacing:.05em;
+  text-align:center;padding:10px 0;line-height:1;
+}
+.conf-bar-wrap{background:var(--surface2);border-radius:20px;height:8px;margin:8px 0 16px;overflow:hidden}
+.conf-bar{height:100%;border-radius:20px;transition:width .5s}
+.conf-checklist{list-style:none}
+.conf-check{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 0;border-bottom:1px solid rgba(30,45,69,.4);
+  font-size:12px;
+}
+.conf-check:last-child{border-bottom:none}
+.conf-check-icon{font-size:14px;flex-shrink:0}
+.conf-sub-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+
 </style>
 </head>
 <body>
@@ -289,6 +411,28 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
 <!-- ═══════════════ APP ════════════════ -->
 <div id="app">
 
+  <!-- cockpit bar (mobile fixed bottom) -->
+  <div id="cockpit-bar">
+    <div class="cockpit-mode">
+      <span id="cockpit-pill" class="cockpit-mode-pill RUNNING">RUNNING</span>
+    </div>
+    <div class="cockpit-pnl" id="cockpit-pnl">$0.00</div>
+    <div class="cockpit-right">
+      <div class="conn-indicator" id="cockpit-sse">◌</div>
+      <button class="btn-sm btn-danger" style="padding:4px 10px;font-size:11px" onclick="switchTab('kill')">⚡ KILL</button>
+    </div>
+  </div>
+
+  <!-- mobile bottom nav -->
+  <div id="mobile-nav">
+    <button class="mobile-nav-btn active" id="mnav-home" onclick="switchTab('home')"><span class="nav-icon">⌂</span>HOME</button>
+    <button class="mobile-nav-btn" id="mnav-live" onclick="switchTab('live')"><span class="nav-icon">◉</span>LIVE</button>
+    <button class="mobile-nav-btn" id="mnav-risk" onclick="switchTab('risk')"><span class="nav-icon">⚠</span>RISK</button>
+    <button class="mobile-nav-btn" id="mnav-timeline" onclick="switchTab('timeline')"><span class="nav-icon">≡</span>TIMELINE</button>
+    <button class="mobile-nav-btn" id="mnav-pnl" onclick="switchTab('pnl')"><span class="nav-icon">$</span>P&amp;L</button>
+    <button class="mobile-nav-btn" id="mnav-kill" onclick="switchTab('kill')"><span class="nav-icon">⚡</span>KILL</button>
+  </div>
+
   <!-- top bar -->
   <div class="topbar">
     <div class="topbar-left">
@@ -306,21 +450,128 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
 
   <!-- tab bar -->
   <div class="tabs">
-    <div class="tab active" data-tab="live" onclick="switchTab('live')">LIVE</div>
-    <div class="tab" data-tab="connections" onclick="switchTab('connections')">CONNECTIONS</div>
-    <div class="tab" data-tab="kill" onclick="switchTab('kill')">KILL SWITCH</div>
-    <div class="tab" data-tab="alerts" onclick="switchTab('alerts')">ALERTS</div>
+    <div class="tab active" data-tab="home" onclick="switchTab('home')">HOME</div>
+    <div class="tab" data-tab="live" onclick="switchTab('live')">LIVE</div>
     <div class="tab" data-tab="risk" onclick="switchTab('risk')">RISK</div>
+    <div class="tab" data-tab="timeline" onclick="switchTab('timeline')">TIMELINE</div>
     <div class="tab" data-tab="pnl" onclick="switchTab('pnl')">P&amp;L</div>
     <div class="tab" data-tab="positions" onclick="switchTab('positions')">POSITIONS</div>
     <div class="tab" data-tab="funding" onclick="switchTab('funding')">FUNDING</div>
     <div class="tab" data-tab="orders" onclick="switchTab('orders')">ORDERS</div>
+    <div class="tab" data-tab="connections" onclick="switchTab('connections')">CONNECTIONS</div>
+    <div class="tab" data-tab="kill" onclick="switchTab('kill')">KILL SWITCH</div>
+    <div class="tab" data-tab="alerts" onclick="switchTab('alerts')">ALERTS</div>
     <div class="tab" data-tab="audit" onclick="switchTab('audit')">AUDIT</div>
     <div class="tab admin-only" data-tab="apikeys" onclick="switchTab('apikeys')">API KEYS</div>
   </div>
 
+  <!-- ─── HOME ────────────────────────────────────────────── -->
+  <div id="tab-home" class="content">
+    <div class="home-grid">
+      <!-- Mode card -->
+      <div id="home-mode-card" class="mode-card" style="color:var(--green);border-color:var(--green)">
+        <div class="mode-card-mode" id="home-mode-text">RUNNING</div>
+        <div class="mode-card-reason" id="home-mode-reason"></div>
+        <div class="mode-card-btns">
+          <button class="btn-sm btn-warn" onclick="setMode('PAUSED')">⏸ PAUSE</button>
+          <button class="btn-sm btn-warn" onclick="setMode('SAFE')">🛡 SAFE</button>
+          <button class="btn-sm btn-danger" onclick="setMode('FLATTEN')">⚡ FLATTEN</button>
+          <button class="btn-sm btn-ok" onclick="setMode('RUNNING')">▶ RESUME</button>
+        </div>
+      </div>
+
+      <!-- PnL summary -->
+      <div class="card">
+        <div class="card-title">P&amp;L Summary</div>
+        <div class="stat-row"><span class="stat-label">TOTAL PnL</span><span class="stat-val" id="home-pnl-total">—</span></div>
+        <div class="stat-row"><span class="stat-label">FILLS</span><span class="stat-val" id="home-pnl-fills">—</span></div>
+        <div class="stat-row"><span class="stat-label">WIN RATE</span><span class="stat-val" id="home-win-rate">—</span></div>
+        <div class="stat-row"><span class="stat-label">SHARPE</span><span class="stat-val" id="home-sharpe">—</span></div>
+        <div class="stat-row"><span class="stat-label">AVG SLIP</span><span class="stat-val" id="home-slippage">—</span></div>
+      </div>
+
+      <!-- Risk light -->
+      <div class="card">
+        <div class="card-title">Risk Cockpit</div>
+        <div class="rag-grid">
+          <div class="rag green" id="home-rag-drawdown">
+            <div class="rag-label">DRAWDOWN</div>
+            <div class="rag-val" id="home-drawdown-val">—</div>
+          </div>
+          <div class="rag green" id="home-rag-errrate">
+            <div class="rag-label">ERR RATE 5m</div>
+            <div class="rag-val" id="home-errrate-val">—</div>
+          </div>
+          <div class="rag green" id="home-rag-adl">
+            <div class="rag-label">ADL RISK</div>
+            <div class="rag-val" id="home-adl-val">—</div>
+          </div>
+          <div class="rag green" id="home-rag-liq">
+            <div class="rag-label">LIQ CLUSTERS</div>
+            <div class="rag-val" id="home-liq-val">—</div>
+          </div>
+          <div class="rag green" id="home-rag-delev">
+            <div class="rag-label">DELEV EVENTS</div>
+            <div class="rag-val" id="home-delev-val">—</div>
+          </div>
+          <div class="rag green" id="home-rag-bl">
+            <div class="rag-label">BLACKLISTED</div>
+            <div class="rag-val" id="home-bl-val">0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Paper confidence -->
+      <div class="card">
+        <div class="card-title">Paper Confidence</div>
+        <div class="conf-score" id="home-conf-score">—</div>
+        <div class="conf-bar-wrap"><div class="conf-bar" id="home-conf-bar" style="width:0%;background:var(--muted)"></div></div>
+        <ul class="conf-checklist">
+          <li class="conf-check"><span class="conf-check-icon" id="chk-paper">○</span><span>Paper trading active</span></li>
+          <li class="conf-check"><span class="conf-check-icon" id="chk-shadow">○</span><span>Score ≥ 50 → Shadow eligible</span></li>
+          <li class="conf-check"><span class="conf-check-icon" id="chk-live">○</span><span>Score ≥ 80 → Live eligible</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Live price feed -->
+    <div class="card" style="margin-top:0">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        Live Prices — Top Tokens by Market Cap
+        <span id="price-feed-updated" style="font-size:10px;color:var(--muted)"></span>
+      </div>
+      <div style="overflow-x:auto">
+        <table id="price-feed-table">
+          <thead>
+            <tr>
+              <th>Token</th>
+              <th>Binance</th><th>Age</th>
+              <th>OKX</th><th>Age</th>
+              <th>Bybit</th><th>Age</th>
+              <th>Deribit</th><th>Age</th>
+            </tr>
+          </thead>
+          <tbody id="price-feed-tbody">
+            <tr><td colspan="9" class="empty-state">Waiting for market data…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Recent alerts -->
+    <div class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        Recent Activity
+        <button class="btn-sm btn-ghost" style="font-size:10px" onclick="switchTab('timeline')">View Timeline →</button>
+      </div>
+      <ul class="timeline-list" id="home-recent-events">
+        <li style="color:var(--muted);padding:10px 0;font-size:12px">No events yet.</li>
+      </ul>
+    </div>
+  </div>
+
   <!-- ─── LIVE ────────────────────────────────────────────── -->
-  <div id="tab-live" class="content">
+  <div id="tab-live" class="content" style="display:none">
     <!-- symbol selector + consensus summary -->
     <div class="card">
       <div class="card-title">Consensus Summary</div>
@@ -356,6 +607,19 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
       <div class="card-title">Recent Anomalies</div>
       <ul class="anom-list" id="anom-list">
         <li class="anom-item"><span class="empty-state">No anomalies detected</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ─── TIMELINE ────────────────────────────────────────── -->
+  <div id="tab-timeline" class="content" style="display:none">
+    <div class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        Activity Timeline
+        <button class="btn-sm btn-ghost" style="font-size:10px" onclick="loadTimeline()">↺ Refresh</button>
+      </div>
+      <ul class="timeline-list" id="timeline-list">
+        <li style="color:var(--muted);padding:10px 0;font-size:12px">Loading…</li>
       </ul>
     </div>
   </div>
@@ -461,6 +725,7 @@ const S = {
   token: '',
   role: 'viewer',       // populated from /api/auth/me after login
   tenantName: 'CONSENSUS',
+  activeTab: 'home',
   // per-symbol: { consensus: {...}, venues: [...] }
   data: {},
   anomalies: [],
@@ -470,6 +735,8 @@ const S = {
   killArmed: false,
   killArmTimer: null,
   evtSource: null,
+  // price feed: { [venue:symbol]: { price, ts_ms } }
+  priceLatest: {},
 };
 
 // ═══════════════════════════════════════════════════════
@@ -509,6 +776,12 @@ async function boot() {
   connectSSE();
   loadConnections();
   loadAlerts();
+  switchTab('home');
+  // Auto-refresh home every 15s.
+  setInterval(() => {
+    if (S.activeTab === 'home') loadHome();
+    if (S.activeTab === 'timeline') loadTimeline();
+  }, 15000);
 }
 
 async function fetchRole() {
@@ -577,20 +850,28 @@ function applyRole(role) {
 // Tabs
 // ═══════════════════════════════════════════════════════
 function switchTab(name) {
+  S.activeTab = name;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-  ['live','connections','kill','alerts','risk','pnl','positions','funding','orders','audit','apikeys'].forEach(t => {
+  // Update mobile nav active state.
+  document.querySelectorAll('.mobile-nav-btn').forEach(b => {
+    b.classList.toggle('active', b.id === 'mnav-' + name);
+  });
+  const allTabs = ['home','live','timeline','connections','kill','alerts','risk','pnl','positions','funding','orders','audit','apikeys'];
+  allTabs.forEach(t => {
     const el = document.getElementById('tab-' + t);
     if (el) el.style.display = t === name ? '' : 'none';
   });
+  if (name === 'home')        loadHome();
   if (name === 'connections') loadConnections();
-  if (name === 'alerts') loadAlerts();
-  if (name === 'risk') loadRisk();
-  if (name === 'pnl') loadPnL();
-  if (name === 'positions') loadPositions();
-  if (name === 'funding') loadFunding();
-  if (name === 'orders') loadOrders();
-  if (name === 'audit') loadAudit();
-  if (name === 'apikeys') loadAPIKeys();
+  if (name === 'alerts')      loadAlerts();
+  if (name === 'risk')        loadRisk();
+  if (name === 'pnl')         loadPnL();
+  if (name === 'positions')   loadPositions();
+  if (name === 'funding')     loadFunding();
+  if (name === 'orders')      loadOrders();
+  if (name === 'timeline')    loadTimeline();
+  if (name === 'audit')       loadAudit();
+  if (name === 'apikeys')     loadAPIKeys();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -605,11 +886,15 @@ function connectSSE() {
     const el = document.getElementById('sse-status');
     el.textContent = '● live';
     el.className = 'conn-indicator ok';
+    const cel = document.getElementById('cockpit-sse');
+    if (cel) { cel.textContent = '●'; cel.style.color = 'var(--green)'; }
   };
   es.onerror = () => {
     const el = document.getElementById('sse-status');
     el.textContent = '○ reconnecting…';
     el.className = 'conn-indicator';
+    const cel = document.getElementById('cockpit-sse');
+    if (cel) { cel.textContent = '○'; cel.style.color = 'var(--muted)'; }
   };
   es.onmessage = e => {
     try {
@@ -634,6 +919,15 @@ function dispatch(type, data) {
 function handleConsensus(d) {
   const sym = d.symbol;
   S.data[sym] = d;
+
+  // Track per-venue latest price for price feed.
+  if (d.venues) {
+    d.venues.forEach(v => {
+      const key = v.venue + ':' + sym;
+      S.priceLatest[key] = { price: v.mid, ts_ms: d.ts_ms || Date.now() };
+    });
+    if (S.activeTab === 'home') renderPriceFeed();
+  }
 
   // Ensure symbol tab exists.
   if (!document.querySelector(`.sym-tab[data-sym="${sym}"]`)) {
@@ -755,6 +1049,8 @@ function handleKillSwitch(d) {
   if (d.active) {
     badge.className = 'kill-badge active';
     badgeT.textContent = '⚡ KILL ACTIVE';
+    const pill = document.getElementById('cockpit-pill');
+    if (pill) { pill.textContent = 'HALTED'; pill.className = 'cockpit-mode-pill HALTED'; }
     card.className = 'kill-status active';
     lbl.style.color = 'var(--red)';
     lbl.textContent = 'ENGINE HALTED';
@@ -1027,6 +1323,18 @@ async function loadRisk() {
       document.getElementById('rm-errrate').textContent = s.error_rate_5m_pct != null ? s.error_rate_5m_pct.toFixed(1) + '%' : '—';
       const bl = s.blacklisted_venues;
       document.getElementById('rm-bl').textContent = bl && bl.length ? bl.join(', ') : 'none';
+      // New equity fields.
+      if (document.getElementById('rm-peak')) {
+        document.getElementById('rm-peak').textContent = s.peak_equity_usd != null ? fmtUSD(s.peak_equity_usd) : '—';
+        document.getElementById('rm-equity').textContent = s.current_equity_usd != null ? fmtUSD(s.current_equity_usd) : '—';
+      }
+      // Exchange incident metrics.
+      setRAG('risk-rag-adl',  s.adl_risk_pct,            40, 70);
+      setRAG('risk-rag-liq',  s.liq_cluster_risk,         2,  5);
+      setRAG('risk-rag-delev',s.venue_delev_event_count,  1,  2);
+      setVal('risk-adl-val',   (s.adl_risk_pct||0).toFixed(1) + '%');
+      setVal('risk-liq-val',   String(s.liq_cluster_risk||0));
+      setVal('risk-delev-val', String(s.venue_delev_event_count||0));
     }
     if (alertsR.ok) {
       const alerts = await alertsR.json();
@@ -1100,6 +1408,7 @@ async function loadPnL() {
       document.getElementById('kpi-slippage').textContent = slippage.toFixed(2) + ' bps';
     }
   } catch(e) { console.warn('loadPnL:', e); }
+  loadConfidence();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1189,6 +1498,252 @@ async function loadOrders() {
 function fmtUSD(v) {
   if (v == null || isNaN(v)) return '$0.00';
   return (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+
+// ── helper: set RAG (Red/Amber/Green) class on element ───────────
+function setRAG(elId, val, warnThresh, redThresh) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.className = el.className.replace(/ ?(green|yellow|red)/g, '');
+  if (val == null || val === 0) { el.classList.add('green'); return; }
+  if (val >= redThresh)  { el.classList.add('red');    return; }
+  if (val >= warnThresh) { el.classList.add('yellow'); return; }
+  el.classList.add('green');
+}
+
+function setVal(elId, v) {
+  const el = document.getElementById(elId);
+  if (el) el.textContent = v;
+}
+
+function fmtAge(tsMs) {
+  if (!tsMs) return '—';
+  const s = Math.floor((Date.now() - tsMs) / 1000);
+  if (s < 5)   return '<span style="color:var(--green)">now</span>';
+  if (s < 60)  return `<span style="color:var(--green)">${s}s</span>`;
+  if (s < 300) return `<span style="color:var(--yellow)">${Math.floor(s/60)}m</span>`;
+  return `<span style="color:var(--red)">${Math.floor(s/60)}m</span>`;
+}
+
+// ── HOME tab ─────────────────────────────────────────────────────
+async function loadHome() {
+  // Load risk state.
+  try {
+    const r = await fetch('/api/risk/state', { headers: authHeaders() });
+    if (r.ok) {
+      const s = await r.json();
+      const mode = s.mode || 'RUNNING';
+      const modeColors = {
+        RUNNING: 'var(--green)', PAUSED: 'var(--yellow)',
+        SAFE: 'var(--orange)', FLATTEN: 'var(--red)', HALTED: 'var(--red)',
+      };
+      const col = modeColors[mode] || 'var(--text)';
+
+      // Update home mode card.
+      const card = document.getElementById('home-mode-card');
+      if (card) {
+        card.style.color = col;
+        card.style.borderColor = col;
+      }
+      setVal('home-mode-text', mode);
+      setVal('home-mode-reason', s.reason || '');
+
+      // Update cockpit bar pill.
+      const pill = document.getElementById('cockpit-pill');
+      if (pill) {
+        pill.textContent = mode;
+        pill.className = 'cockpit-mode-pill ' + mode;
+      }
+
+      // Risk light RAGs.
+      const dd = s.drawdown_pct || 0;
+      setRAG('home-rag-drawdown', dd, 5, 15);
+      setVal('home-drawdown-val', dd.toFixed(1) + '%');
+
+      const er = s.error_rate_5m_pct || 0;
+      setRAG('home-rag-errrate', er, 10, 25);
+      setVal('home-errrate-val', er.toFixed(1) + '%');
+
+      const adl = s.adl_risk_pct || 0;
+      setRAG('home-rag-adl', adl, 40, 70);
+      setVal('home-adl-val', adl.toFixed(1) + '%');
+
+      const liq = s.liq_cluster_risk || 0;
+      setRAG('home-rag-liq', liq, 2, 5);
+      setVal('home-liq-val', String(liq));
+
+      const delev = s.venue_delev_event_count || 0;
+      setRAG('home-rag-delev', delev, 1, 2);
+      setVal('home-delev-val', String(delev));
+
+      const bl = (s.blacklisted_venues || []).length;
+      setRAG('home-rag-bl', bl, 1, 3);
+      setVal('home-bl-val', String(bl));
+    }
+  } catch(e) { console.warn('loadHome/risk:', e); }
+
+  // Load KPI / PnL.
+  try {
+    const [pnlR, kpiR] = await Promise.all([
+      fetch('/api/pnl', { headers: authHeaders() }),
+      fetch('/api/metrics/kpi', { headers: authHeaders() }),
+    ]);
+    if (pnlR.ok) {
+      const d = await pnlR.json();
+      const rows = d.by_strategy || [];
+      let total = 0;
+      rows.forEach(r => { total += parseFloat(r.total_pnl) || 0; });
+      const col = total >= 0 ? 'var(--green)' : 'var(--red)';
+      const el = document.getElementById('home-pnl-total');
+      if (el) { el.textContent = fmtUSD(total); el.style.color = col; }
+      // Also update cockpit bar.
+      const cpnl = document.getElementById('cockpit-pnl');
+      if (cpnl) { cpnl.textContent = fmtUSD(total); cpnl.style.color = col; }
+      // Fill count.
+      let fills = 0;
+      rows.forEach(r => { fills += parseInt(r.fill_count) || 0; });
+      setVal('home-pnl-fills', fills.toLocaleString());
+    }
+    if (kpiR.ok) {
+      const kpi = await kpiR.json();
+      setVal('home-win-rate', (parseFloat(kpi.win_rate_pct)||0).toFixed(1) + '%');
+      const sh = parseFloat(kpi.sharpe_proxy) || 0;
+      const shEl = document.getElementById('home-sharpe');
+      if (shEl) {
+        shEl.textContent = sh.toFixed(2);
+        shEl.style.color = sh >= 1 ? 'var(--green)' : sh >= 0 ? 'var(--yellow)' : 'var(--red)';
+      }
+      setVal('home-slippage', (parseFloat(kpi.avg_slippage_bps)||0).toFixed(2) + ' bps');
+    }
+  } catch(e) { console.warn('loadHome/pnl:', e); }
+
+  // Load confidence.
+  try {
+    const r = await fetch('/api/paper/confidence', { headers: authHeaders() });
+    if (r.ok) {
+      const d = await r.json();
+      const score = parseFloat(d.score) || 0;
+      const col = score >= 80 ? 'var(--green)' : score >= 50 ? 'var(--yellow)' : 'var(--red)';
+      const el = document.getElementById('home-conf-score');
+      if (el) { el.textContent = score.toFixed(0); el.style.color = col; }
+      const bar = document.getElementById('home-conf-bar');
+      if (bar) { bar.style.width = score + '%'; bar.style.background = col; }
+      // Checklist.
+      setVal('chk-paper',  '✓');
+      const chkS = document.getElementById('chk-shadow');
+      if (chkS) { chkS.textContent = score >= 50 ? '✓' : '○'; chkS.style.color = score >= 50 ? 'var(--green)' : 'var(--muted)'; }
+      const chkL = document.getElementById('chk-live');
+      if (chkL) { chkL.textContent = score >= 80 ? '✓' : '○'; chkL.style.color = score >= 80 ? 'var(--green)' : 'var(--muted)'; }
+    }
+  } catch(e) { console.warn('loadHome/conf:', e); }
+
+  // Load recent timeline events.
+  try {
+    const r = await fetch('/api/timeline?limit=8', { headers: authHeaders() });
+    if (r.ok) {
+      const events = await r.json();
+      renderTimelineList('home-recent-events', events || []);
+    }
+  } catch(e) { console.warn('loadHome/timeline:', e); }
+
+  renderPriceFeed();
+}
+
+// ── TIMELINE tab ─────────────────────────────────────────────────
+async function loadTimeline() {
+  try {
+    const r = await fetch('/api/timeline?limit=100', { headers: authHeaders() });
+    if (!r.ok) return;
+    const events = await r.json();
+    renderTimelineList('timeline-list', events || []);
+  } catch(e) { console.warn('loadTimeline:', e); }
+}
+
+function renderTimelineList(elId, events) {
+  const ul = document.getElementById(elId);
+  if (!ul) return;
+  if (!events.length) {
+    ul.innerHTML = '<li style="color:var(--muted);padding:10px 0;font-size:12px">No events yet.</li>';
+    return;
+  }
+  const kindLabel = { risk_alert:'RISK', execution:'EXEC', anomaly:'ANOMALY', mode_change:'MODE' };
+  const kindColor = { risk_alert:'var(--red)', execution:'var(--green)', anomaly:'var(--yellow)', mode_change:'var(--accent)' };
+  ul.innerHTML = events.map(e => {
+    const p = e.payload || {};
+    const msg = p.message || p.anomaly_type || p.event_type || p.mode || JSON.stringify(p).slice(0, 80);
+    const col = kindColor[e.kind] || 'var(--muted)';
+    const venue = p.venue ? p.venue.toUpperCase() + ' · ' : '';
+    return `<li class="tl-item">
+      <div class="tl-dot ${e.kind}" style="background:${col}"></div>
+      <div class="tl-body">
+        <div class="tl-kind">${kindLabel[e.kind]||e.kind}</div>
+        <div class="tl-msg">${venue}${escHtml(String(msg))}</div>
+        <div class="tl-ts">${fmtTime(e.ts_ms)}</div>
+      </div>
+    </li>`;
+  }).join('');
+}
+
+// ── PAPER CONFIDENCE (P&L tab) ───────────────────────────────────
+async function loadConfidence() {
+  try {
+    const r = await fetch('/api/paper/confidence', { headers: authHeaders() });
+    if (!r.ok) return;
+    const d = await r.json();
+    const score = parseFloat(d.score) || 0;
+    const col = score >= 80 ? 'var(--green)' : score >= 50 ? 'var(--yellow)' : 'var(--red)';
+    const el = document.getElementById('pnl-conf-score');
+    if (el) { el.textContent = score.toFixed(0); el.style.color = col; }
+    const bar = document.getElementById('pnl-conf-bar');
+    if (bar) { bar.style.width = score + '%'; bar.style.background = col; }
+    const det = d.details || {};
+    setVal('pnl-cs-fill',   (det.fill_volume_score||0).toFixed(0));
+    setVal('pnl-cs-win',    (det.win_rate_score||0).toFixed(0));
+    setVal('pnl-cs-sharpe', (det.sharpe_score||0).toFixed(0));
+    setVal('pnl-cs-slip',   (det.slippage_discipline||0).toFixed(0));
+    const chkP = document.getElementById('pnl-chk-paper');
+    if (chkP) { chkP.textContent = '✓'; chkP.style.color = 'var(--green)'; }
+    const chkS = document.getElementById('pnl-chk-shadow');
+    if (chkS) { chkS.textContent = score >= 50 ? '✓' : '○'; chkS.style.color = score >= 50 ? 'var(--green)' : 'var(--muted)'; }
+    const chkL = document.getElementById('pnl-chk-live');
+    if (chkL) { chkL.textContent = score >= 80 ? '✓' : '○'; chkL.style.color = score >= 80 ? 'var(--green)' : 'var(--muted)'; }
+  } catch(e) { console.warn('loadConfidence:', e); }
+}
+
+// ── PRICE FEED (home tab) ────────────────────────────────────────
+// Top tokens by market cap (non-stablecoin), ordered by notional importance.
+const PRICE_FEED_TOKENS = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP'];
+const PRICE_FEED_VENUES = ['binance', 'okx', 'bybit', 'deribit'];
+
+function renderPriceFeed() {
+  const tbody = document.getElementById('price-feed-tbody');
+  if (!tbody) return;
+  const now = Date.now();
+
+  const rows = PRICE_FEED_TOKENS.map(token => {
+    // Find best matching symbol per venue (e.g. BTCUSDT, BTC-USDT, BTCPERP).
+    const cells = PRICE_FEED_VENUES.map(venue => {
+      // Look through priceLatest for keys matching this venue + token.
+      let best = null;
+      for (const [k, v] of Object.entries(S.priceLatest)) {
+        const [kv, sym] = k.split(':');
+        if (kv === venue && sym && sym.startsWith(token) && !sym.includes('DOWN') && !sym.includes('UP')) {
+          if (!best || v.ts_ms > best.ts_ms) best = v;
+        }
+      }
+      if (!best) return '<td style="color:var(--muted)">—</td><td style="color:var(--muted)">—</td>';
+      const age = now - best.ts_ms;
+      const ageStr = age < 5000 ? '<span style="color:var(--green)">now</span>'
+                   : age < 60000 ? `<span style="color:var(--green)">${Math.floor(age/1000)}s</span>`
+                   : `<span style="color:var(--red)">${Math.floor(age/60000)}m</span>`;
+      return `<td>${fmtPrice(best.price)}</td><td>${ageStr}</td>`;
+    });
+    return `<tr><td style="font-weight:bold;color:var(--accent)">${token}</td>${cells.join('')}</tr>`;
+  });
+
+  tbody.innerHTML = rows.join('');
+  const ts = document.getElementById('price-feed-updated');
+  if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US', { hour12: false });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1356,15 +1911,40 @@ async function saveBranding() {
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Risk Metrics</div>
+        <div class="card-title">Core Risk Metrics</div>
         <div class="consensus-grid" id="risk-metrics-grid">
           <div class="metric"><div class="metric-label">DRAWDOWN</div><div class="metric-val" id="rm-drawdown">—</div></div>
           <div class="metric"><div class="metric-label">NET DELTA</div><div class="metric-val" id="rm-delta">—</div></div>
           <div class="metric"><div class="metric-label">ERROR RATE 5m</div><div class="metric-val" id="rm-errrate">—</div></div>
           <div class="metric"><div class="metric-label">BLACKLISTED</div><div class="metric-val" id="rm-bl">—</div></div>
+          <div class="metric"><div class="metric-label">PEAK EQUITY</div><div class="metric-val" id="rm-peak">—</div></div>
+          <div class="metric"><div class="metric-label">CURR EQUITY</div><div class="metric-val" id="rm-equity">—</div></div>
         </div>
       </div>
     </div>
+
+    <!-- Exchange incident metrics -->
+    <div class="card">
+      <div class="card-title">Exchange Incident Metrics</div>
+      <div class="rag-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="rag green" id="risk-rag-adl">
+          <div class="rag-label">ADL RISK PCT</div>
+          <div class="rag-val" id="risk-adl-val">—</div>
+          <div style="font-size:9px;color:var(--muted);margin-top:2px">insurance fund thin</div>
+        </div>
+        <div class="rag green" id="risk-rag-liq">
+          <div class="rag-label">LIQ CLUSTERS</div>
+          <div class="rag-val" id="risk-liq-val">—</div>
+          <div style="font-size:9px;color:var(--muted);margin-top:2px">cascade risk</div>
+        </div>
+        <div class="rag green" id="risk-rag-delev">
+          <div class="rag-label">DELEV EVENTS</div>
+          <div class="rag-val" id="risk-delev-val">—</div>
+          <div style="font-size:9px;color:var(--muted);margin-top:2px">5m rolling window</div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-title">Recent Risk Alerts</div>
       <ul id="risk-alerts-list" class="anom-list"></ul>
@@ -1387,15 +1967,33 @@ async function saveBranding() {
           <tbody id="pnl-tbody"><tr><td colspan="4" class="empty-state">Loading…</td></tr></tbody>
         </table>
       </div>
-      <div class="card">
-        <div class="card-title">Summary</div>
-        <div class="consensus-grid" id="pnl-summary-grid">
-          <div class="metric"><div class="metric-label">TOTAL PNL</div><div class="metric-val" id="pnl-total">—</div></div>
-          <div class="metric"><div class="metric-label">TOTAL FEES</div><div class="metric-val" id="pnl-fees">—</div></div>
-          <div class="metric"><div class="metric-label">FILL COUNT</div><div class="metric-val" id="pnl-fills">—</div></div>
-          <div class="metric"><div class="metric-label">SHARPE PROXY</div><div class="metric-val" id="kpi-sharpe">—</div></div>
-          <div class="metric"><div class="metric-label">WIN RATE</div><div class="metric-val" id="kpi-win-rate">—</div></div>
-          <div class="metric"><div class="metric-label">AVG SLIPPAGE</div><div class="metric-val" id="kpi-slippage">—</div></div>
+      <div>
+        <div class="card">
+          <div class="card-title">Summary</div>
+          <div class="consensus-grid" id="pnl-summary-grid">
+            <div class="metric"><div class="metric-label">TOTAL PNL</div><div class="metric-val" id="pnl-total">—</div></div>
+            <div class="metric"><div class="metric-label">TOTAL FEES</div><div class="metric-val" id="pnl-fees">—</div></div>
+            <div class="metric"><div class="metric-label">FILL COUNT</div><div class="metric-val" id="pnl-fills">—</div></div>
+            <div class="metric"><div class="metric-label">SHARPE PROXY</div><div class="metric-val" id="kpi-sharpe">—</div></div>
+            <div class="metric"><div class="metric-label">WIN RATE</div><div class="metric-val" id="kpi-win-rate">—</div></div>
+            <div class="metric"><div class="metric-label">AVG SLIPPAGE</div><div class="metric-val" id="kpi-slippage">—</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Paper → Live Confidence</div>
+          <div class="conf-score" id="pnl-conf-score" style="color:var(--muted)">—</div>
+          <div class="conf-bar-wrap"><div class="conf-bar" id="pnl-conf-bar" style="width:0%;background:var(--muted)"></div></div>
+          <div class="conf-sub-grid">
+            <div class="metric"><div class="metric-label">FILL VOL</div><div class="metric-val" id="pnl-cs-fill">—</div></div>
+            <div class="metric"><div class="metric-label">WIN RATE</div><div class="metric-val" id="pnl-cs-win">—</div></div>
+            <div class="metric"><div class="metric-label">SHARPE</div><div class="metric-val" id="pnl-cs-sharpe">—</div></div>
+            <div class="metric"><div class="metric-label">SLIPPAGE</div><div class="metric-val" id="pnl-cs-slip">—</div></div>
+          </div>
+          <ul class="conf-checklist">
+            <li class="conf-check"><span class="conf-check-icon" id="pnl-chk-paper">○</span><span>Paper mode active (current)</span></li>
+            <li class="conf-check"><span class="conf-check-icon" id="pnl-chk-shadow">○</span><span>Score ≥ 50 — Shadow eligible</span></li>
+            <li class="conf-check"><span class="conf-check-icon" id="pnl-chk-live">○</span><span>Score ≥ 80 — Live eligible</span></li>
+          </ul>
         </div>
       </div>
     </div>
