@@ -66,8 +66,9 @@ func main() {
 		"live:fills",
 		"risk:alerts",
 		"risk:state",
-		"trade:intents:approved",
-		"venue_status_updates", // consensus engine publishes venue state transitions here
+		"trade:intents",          // raw proposals from arb + funding engines
+		"trade:intents:approved", // post-allocator approved intents
+		"venue_status_updates",   // consensus engine publishes venue state transitions here
 	}
 	for _, s := range streams {
 		if err := sc.EnsureConsumerGroup(ctx, s, group); err != nil {

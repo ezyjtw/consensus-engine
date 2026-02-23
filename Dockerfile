@@ -3,11 +3,11 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o dashboard ./cmd/dashboard
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /dashboard ./cmd/dashboard
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
-COPY --from=builder /app/dashboard .
+COPY --from=builder /dashboard .
 EXPOSE 8080
 CMD ["./dashboard"]
