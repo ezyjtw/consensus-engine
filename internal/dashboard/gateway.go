@@ -34,6 +34,7 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	s.mux.HandleFunc("POST /api/mode/pause", s.auth(gw.handleSetMode("PAUSED")))
 	s.mux.HandleFunc("POST /api/mode/safe", s.auth(gw.handleSetMode("SAFE")))
 	s.mux.HandleFunc("POST /api/mode/flatten", s.auth(gw.handleSetMode("FLATTEN")))
+	s.mux.HandleFunc("POST /api/mode/running", s.auth(gw.handleSetMode("RUNNING")))
 	s.mux.HandleFunc("GET /api/risk/state", s.auth(gw.handleGetRiskState))
 	s.mux.HandleFunc("GET /api/risk/history", s.auth(gw.handleGetRiskHistory))
 	s.mux.HandleFunc("GET /api/risk/alerts", s.auth(gw.handleGetRiskAlerts))

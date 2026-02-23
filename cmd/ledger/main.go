@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yourorg/arbsuite/internal/consensus"
 	"github.com/yourorg/arbsuite/internal/eventbus"
 	"github.com/yourorg/arbsuite/internal/execution"
 	"github.com/yourorg/arbsuite/internal/ledger"
@@ -52,7 +53,6 @@ func main() {
 		tenantID = "default"
 	}
 
-	// One StreamClient subscribing to all relevant streams.
 	sc, err := eventbus.NewStreamClient(redisAddr, redisPw, redisTLS)
 	if err != nil {
 		log.Fatalf("ledger: redis connect: %v", err)
@@ -67,12 +67,17 @@ func main() {
 		"risk:alerts",
 		"risk:state",
 		"trade:intents:approved",
+		"venue_status_updates", // consensus engine publishes venue state transitions here
 	}
 	for _, s := range streams {
 		if err := sc.EnsureConsumerGroup(ctx, s, group); err != nil {
 			log.Printf("ledger: ensure group on %q: %v (ok if stream not yet created)", s, err)
 		}
 	}
+
+	// prevVenueState tracks the last-seen state per venue+symbol so we can record the
+	// "from" state in venue_status_history (Postgres has no previous-row knowledge).
+	prevVenueState := make(map[string]string)
 
 	log.Println("ledger: started — persisting events to Postgres")
 
@@ -85,13 +90,14 @@ func main() {
 			log.Println("ledger: shutdown")
 			return
 		case <-ticker.C:
-			drainAll(ctx, sc, db, group, "worker-1", streams, tenantID)
+			drainAll(ctx, sc, db, group, "worker-1", streams, tenantID, prevVenueState)
 		}
 	}
 }
 
 func drainAll(ctx context.Context, sc *eventbus.StreamClient, db *ledger.DB,
-	group, consumer string, streams []string, tenantID string) {
+	group, consumer string, streams []string, tenantID string,
+	prevState map[string]string) {
 
 	for _, stream := range streams {
 		msgs, err := sc.ReadMessages(ctx, stream, group, consumer, 50, 10*time.Millisecond)
@@ -104,13 +110,14 @@ func drainAll(ctx context.Context, sc *eventbus.StreamClient, db *ledger.DB,
 				sc.Ack(ctx, stream, group, m.ID) //nolint:errcheck
 				continue
 			}
-			persistMsg(ctx, db, stream, raw, tenantID)
+			persistMsg(ctx, db, stream, raw, tenantID, prevState)
 			sc.Ack(ctx, stream, group, m.ID) //nolint:errcheck
 		}
 	}
 }
 
-func persistMsg(ctx context.Context, db *ledger.DB, stream, raw, tenantID string) {
+func persistMsg(ctx context.Context, db *ledger.DB, stream, raw, tenantID string,
+	prevState map[string]string) {
 	switch stream {
 	case "execution:events":
 		var ev execution.ExecutionEvent
@@ -139,6 +146,19 @@ func persistMsg(ctx context.Context, db *ledger.DB, stream, raw, tenantID string
 			if err := db.WriteRiskState(ctx, state); err != nil {
 				log.Printf("ledger: write risk state: %v", err)
 			}
+		}
+	case "venue_status_updates":
+		var su consensus.VenueStatusUpdate
+		if err := json.Unmarshal([]byte(raw), &su); err == nil {
+			key := string(su.Venue) + ":" + string(su.Symbol)
+			from := prevState[key]
+			if from == "" {
+				from = "UNKNOWN"
+			}
+			if err := db.WriteVenueStatus(ctx, su, from); err != nil {
+				log.Printf("ledger: write venue status: %v", err)
+			}
+			prevState[key] = string(su.Status)
 		}
 	}
 }
