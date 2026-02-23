@@ -84,6 +84,10 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	s.mux.HandleFunc("GET /api/audit", s.authRole(auth.RoleAuditor, gw.handleGetAudit))
 	s.mux.HandleFunc("GET /api/audit/export", s.authRole(auth.RoleAuditor, gw.handleExportAudit))
 
+	// ── Activity timeline + paper confidence ──────────────────────────────
+	s.mux.HandleFunc("GET /api/timeline", s.auth(gw.handleTimeline))
+	s.mux.HandleFunc("GET /api/paper/confidence", s.auth(gw.handlePaperConfidence))
+
 	// Health (public)
 	s.mux.HandleFunc("GET /api/health", gw.handleHealth)
 }
@@ -786,4 +790,141 @@ func parseDateRange(r *http.Request) (from, to time.Time, limit int) {
 		limit = 10000
 	}
 	return
+}
+
+// ── Activity timeline ─────────────────────────────────────────────────────
+
+// handleTimeline returns a merged, reverse-chronological activity feed drawn
+// from multiple Redis streams. It combines:
+//   - Risk alerts        (risk:alerts stream)
+//   - Execution events   (execution:events stream)
+//   - Consensus anomalies (consensus:anomalies stream)
+//   - Mode changes       (risk:mode_changes stream key in Redis)
+//
+// Each event is tagged with a "kind" field for dashboard colouring.
+func (gw *Gateway) handleTimeline(w http.ResponseWriter, r *http.Request) {
+	count, _ := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64)
+	if count == 0 || count > 200 {
+		count = 100
+	}
+
+	type event struct {
+		Kind    string                 `json:"kind"`
+		TsMs    int64                  `json:"ts_ms"`
+		Payload map[string]interface{} `json:"payload"`
+	}
+
+	var events []event
+
+	streams := []struct {
+		key  string
+		kind string
+	}{
+		{"risk:alerts", "risk_alert"},
+		{"execution:events", "execution"},
+		{"consensus:anomalies", "anomaly"},
+		{"risk:mode_changes", "mode_change"},
+	}
+
+	for _, s := range streams {
+		msgs, err := gw.rdb.XRevRangeN(r.Context(), s.key, "+", "-", count).Result()
+		if err != nil {
+			continue
+		}
+		for _, m := range msgs {
+			raw, ok := m.Values["data"].(string)
+			if !ok {
+				continue
+			}
+			var payload map[string]interface{}
+			if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+				continue
+			}
+			// Extract ts_ms from payload or fall back to stream ID.
+			tsMs := int64(0)
+			if v, ok := payload["ts_ms"].(float64); ok {
+				tsMs = int64(v)
+			}
+			events = append(events, event{Kind: s.kind, TsMs: tsMs, Payload: payload})
+		}
+	}
+
+	// Sort descending by ts_ms (simple insertion sort — small N).
+	for i := 1; i < len(events); i++ {
+		for j := i; j > 0 && events[j].TsMs > events[j-1].TsMs; j-- {
+			events[j], events[j-1] = events[j-1], events[j]
+		}
+	}
+	// Truncate to requested count.
+	if int64(len(events)) > count {
+		events = events[:count]
+	}
+
+	jsonOK(w, events)
+}
+
+// ── Paper trading confidence ──────────────────────────────────────────────
+
+// handlePaperConfidence computes a 0–100 confidence score for paper trading
+// readiness based on KPI metrics. Returns sub-scores and the composite score.
+func (gw *Gateway) handlePaperConfidence(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonOK(w, map[string]interface{}{
+			"score":   0,
+			"note":    "postgres not connected — confidence requires KPI data",
+			"details": map[string]interface{}{},
+		})
+		return
+	}
+
+	kpi, err := gw.db.KPISummary(r.Context(), gw.tenantID)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	fillCount, _ := kpi["fill_count"].(int64)
+	winRate, _ := kpi["win_rate_pct"].(float64)
+	sharpe, _ := kpi["sharpe_proxy"].(float64)
+	avgSlippage, _ := kpi["avg_slippage_bps"].(float64)
+
+	// Sub-scores (each 0–100).
+	// Fill volume: ramp from 0 at 0 fills to 100 at 200+ fills.
+	fillScore := clamp(float64(fillCount)/2.0, 0, 100)
+	// Win rate: 50% baseline = 50 pts, 70% = 100 pts.
+	winScore := clamp((winRate-50)/20*100, 0, 100)
+	// Sharpe proxy: 0 at ≤0, 100 at ≥2.
+	sharpeScore := clamp(sharpe/2*100, 0, 100)
+	// Slippage discipline: 100 at 0 bps, 0 at ≥10 bps.
+	slippageScore := clamp(100-avgSlippage*10, 0, 100)
+
+	composite := (fillScore + winScore + sharpeScore + slippageScore) / 4
+
+	jsonOK(w, map[string]interface{}{
+		"score":   fmt.Sprintf("%.0f", composite),
+		"details": map[string]interface{}{
+			"fill_volume_score":    fillScore,
+			"win_rate_score":       winScore,
+			"sharpe_score":         sharpeScore,
+			"slippage_discipline":  slippageScore,
+			"fill_count":           fillCount,
+			"win_rate_pct":         winRate,
+			"sharpe_proxy":         sharpe,
+			"avg_slippage_bps":     avgSlippage,
+		},
+		"thresholds": map[string]interface{}{
+			"min_score_for_shadow": 50,
+			"min_score_for_live":   80,
+		},
+	})
+}
+
+func clamp(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }

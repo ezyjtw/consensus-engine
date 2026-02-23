@@ -1,0 +1,44 @@
+# Transfer Policy Engine configuration
+# ALL transfers must pass this policy before reaching an exchange API.
+# Changes to this file are detected via SHA-256 tamper check on every transfer.
+
+# V1: manual approval required for every transfer regardless of allowlist status.
+# Set to false only once you have automated approval workflows and audit in place.
+manual_approval_required: true
+
+# Per-transfer hard cap (USD). 0 = unlimited (not recommended).
+max_per_transfer_usd: 50000
+
+# Rolling 24-hour total cap across all transfers.
+max_daily_usd: 200000
+
+# Maximum number of transfers in any 24-hour window.
+max_transfers_per_day: 10
+
+# New address cooloff: a freshly added allowlist entry cannot receive transfers
+# for this many hours. Protects against social-engineering attacks where an
+# operator is tricked into adding a malicious address.
+new_address_cooloff_hours: 48
+
+# Pre-approved destination addresses. Only addresses on this list may receive
+# transfers. Entries must be reviewed and added by an admin with 2FA confirmation.
+#
+# Fields:
+#   label:          human-readable description
+#   address:        exact on-chain address (case-insensitive match)
+#   asset:          asset symbol or "*" for any asset
+#   max_per_tx_usd: per-tx cap for this entry (0 = use global)
+#   added_at:       ISO date when this entry was approved (used for cooloff)
+allowlist: []
+# Example entries (uncomment and populate after review):
+# - label: "Binance hot wallet USDT"
+#   address: "0xABCD..."
+#   asset: "USDT"
+#   max_per_tx_usd: 25000
+#   added_at: "2026-02-23"
+#
+# - label: "OKX funding account USDC"
+#   address: "0x1234..."
+#   asset: "USDC"
+#   max_per_tx_usd: 50000
+#   added_at: "2026-02-23"
