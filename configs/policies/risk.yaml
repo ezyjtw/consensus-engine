@@ -1,0 +1,39 @@
+tenant_id: "default"
+
+# Delta and drawdown thresholds.
+max_net_delta_usd: 5000
+max_drawdown_pct: 3.0
+safe_mode_drawdown_pct: 5.0
+
+# Margin and liquidation safety (polled from exchange REST in live mode).
+max_margin_utilisation_pct: 70.0
+safe_mode_margin_utilisation_pct: 85.0
+min_liquidation_distance_pct: 20.0
+
+# Hedge drift (unhedged notional × seconds unhedged).
+max_hedge_drift_usd_seconds: 500
+
+# Execution error rate (rolling 5-minute window).
+max_error_rate_5m_pct: 10.0
+
+# Ledger reconciliation divergence.
+max_reconciliation_divergence_usd: 50.0
+
+# Number of simultaneously blacklisted CORE venues that triggers SAFE MODE.
+min_core_venues_for_safe_mode: 2
+
+# How often to poll exchange REST APIs for position truth (live mode only).
+position_truth_poll_interval_s: 30
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  use_tls: false
+  events_stream: "execution:events"
+  status_stream: "venue_status_updates"
+  alerts_stream: "risk:alerts"
+  state_stream: "risk:state"
+  consumer_group: "risk-daemon"
+  consumer_name: "worker-1"
+  block_ms: 500
+  batch_size: 100

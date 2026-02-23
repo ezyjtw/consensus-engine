@@ -12,6 +12,7 @@ var knownExchanges = []string{"binance", "okx", "bybit", "deribit", "htx", "gate
 
 // Server wires up all HTTP routes for the dashboard.
 type Server struct {
+	gw          *Gateway
 	store       *Store
 	sse         *StreamHandler
 	alerts      *AlertWorker

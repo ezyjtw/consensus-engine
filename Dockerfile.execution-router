@@ -1,0 +1,14 @@
+FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /execution-router ./cmd/execution-router
+
+FROM alpine:3.19
+RUN apk --no-cache add ca-certificates tzdata
+WORKDIR /app
+COPY --from=builder /execution-router /app/execution-router
+COPY configs/ /app/configs/
+ENV REDIS_ADDR="redis:6379"
+ENTRYPOINT ["/app/execution-router"]

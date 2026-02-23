@@ -1,0 +1,187 @@
+# ArbSuite — full local stack (paper trading mode)
+# Usage:
+#   DASHBOARD_MASTER_KEY=<32-byte-hex> docker compose up
+#
+# All services start in PAPER mode by default.
+# Set TRADING_MODE=SHADOW for shadow execution against live exchange feeds.
+
+version: "3.9"
+
+x-common-env: &common-env
+  REDIS_ADDR: "redis:6379"
+  REDIS_PASSWORD: ""
+  REDIS_TLS: "false"
+  TENANT_ID: "default"
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    <<: *restart
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    <<: *restart
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: arbsuite
+      POSTGRES_USER: arbsuite
+      POSTGRES_PASSWORD: arbsuite
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arbsuite"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Data feeds ──────────────────────────────────────────────────────────
+  market-data:
+    build:
+      context: .
+      dockerfile: Dockerfile.market-data
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+    volumes:
+      - ./configs/market_data.yaml:/app/configs/market_data.yaml:ro
+
+  # ── Engines ─────────────────────────────────────────────────────────────
+  consensus:
+    build:
+      context: .
+      dockerfile: Dockerfile.consensus-engine
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+    volumes:
+      - ./configs/policies/consensus_policy.yaml:/app/configs/policies/consensus_policy.yaml:ro
+
+  arb-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.arb-engine
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+    volumes:
+      - ./configs/policies/arb_engine.yaml:/app/configs/policies/arb_engine.yaml:ro
+
+  funding-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.funding-engine
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+    volumes:
+      - ./configs/policies/funding_engine.yaml:/app/configs/policies/funding_engine.yaml:ro
+
+  # ── Capital management ──────────────────────────────────────────────────
+  capital-allocator:
+    build:
+      context: .
+      dockerfile: Dockerfile.capital-allocator
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+    volumes:
+      - ./configs/policies/allocator.yaml:/app/configs/policies/allocator.yaml:ro
+
+  # ── Execution ───────────────────────────────────────────────────────────
+  execution-router:
+    build:
+      context: .
+      dockerfile: Dockerfile.execution-router
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      TRADING_MODE: "PAPER"  # override with SHADOW or LIVE
+    volumes:
+      - ./configs/execution_router.yaml:/app/configs/execution_router.yaml:ro
+
+  # ── Risk & safety ───────────────────────────────────────────────────────
+  risk-daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile.risk-daemon
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+    volumes:
+      - ./configs/policies/risk.yaml:/app/configs/policies/risk.yaml:ro
+
+  # ── Ledger ──────────────────────────────────────────────────────────────
+  ledger:
+    build:
+      context: .
+      dockerfile: Dockerfile.ledger
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      POSTGRES_DSN: "postgres://arbsuite:arbsuite@postgres:5432/arbsuite?sslmode=disable"
+
+  # ── Dashboard + Gateway API ─────────────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *common-env
+      PORT: "8080"
+      POSTGRES_DSN: "postgres://arbsuite:arbsuite@postgres:5432/arbsuite?sslmode=disable"
+      # REQUIRED — generate with: openssl rand -hex 32
+      DASHBOARD_MASTER_KEY: "${DASHBOARD_MASTER_KEY}"
+      DASHBOARD_AUTH_TOKEN: "${DASHBOARD_AUTH_TOKEN:-}"
+
+volumes:
+  redis_data:
+  pg_data:

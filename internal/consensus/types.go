@@ -34,6 +34,7 @@ type Quote struct {
 	AskDepth1Pct float64    `json:"ask_depth_1pct,omitempty"`
 	Orderbook    *Orderbook `json:"orderbook,omitempty"`
 	FeeBpsTaker  float64    `json:"fee_bps_taker"`
+	FundingRate  float64    `json:"funding_rate,omitempty"`
 	FeedHealth   FeedHealth `json:"feed_health"`
 }
 

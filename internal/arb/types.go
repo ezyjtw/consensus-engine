@@ -6,11 +6,12 @@ import "github.com/yourorg/arbsuite/internal/consensus"
 type ConsensusUpdate = consensus.ConsensusUpdate
 type VenueMetrics = consensus.VenueMetrics
 
-// TradeLeg describes one side of a two-leg arb intent.
+// TradeLeg describes one side of a two-leg arb or funding intent.
 type TradeLeg struct {
 	Venue          string  `json:"venue"`
 	Action         string  `json:"action"`           // BUY | SELL
 	Type           string  `json:"type"`             // MARKET_OR_IOC
+	Market         string  `json:"market,omitempty"` // PERP (default) | SPOT
 	NotionalUSD    float64 `json:"notional_usd"`
 	MaxSlippageBps float64 `json:"max_slippage_bps"`
 	PriceLimit     float64 `json:"price_limit"`
@@ -18,11 +19,13 @@ type TradeLeg struct {
 
 // ExpectedMetrics holds the pre-trade P&L estimate embedded in each intent.
 type ExpectedMetrics struct {
-	EdgeBpsGross   float64 `json:"edge_bps_gross"`
-	EdgeBpsNet     float64 `json:"edge_bps_net"`
-	ProfitUSDNet   float64 `json:"profit_usd_net"`
-	FeesUSDEst     float64 `json:"fees_usd_est"`
-	SlippageUSDEst float64 `json:"slippage_usd_est"`
+	EdgeBpsGross      float64 `json:"edge_bps_gross"`
+	EdgeBpsNet        float64 `json:"edge_bps_net"`
+	ProfitUSDNet      float64 `json:"profit_usd_net"`
+	FeesUSDEst        float64 `json:"fees_usd_est"`
+	SlippageUSDEst    float64 `json:"slippage_usd_est"`
+	FundingRate8hBps  float64 `json:"funding_rate_8h_bps,omitempty"`
+	AnnualYieldPctNet float64 `json:"annual_yield_pct_net,omitempty"`
 }
 
 // IntentConstraints carries execution safety rules for the router.
@@ -44,8 +47,8 @@ type IntentDebug struct {
 	SellExec          float64 `json:"sell_exec"`
 }
 
-// TradeIntent is the arb engine's primary output: a two-leg opportunity
-// ready to be validated by the Risk Daemon and executed by the Execution Router.
+// TradeIntent is the primary output of strategy engines: a multi-leg opportunity
+// ready to be validated by the Capital Allocator and executed by the Execution Router.
 type TradeIntent struct {
 	TenantID    string            `json:"tenant_id"`
 	IntentID    string            `json:"intent_id"`
