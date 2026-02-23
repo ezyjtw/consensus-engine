@@ -25,10 +25,19 @@ type ExecutionEvent struct {
 }
 
 // SimulatedFill records the full paper trading fill for PnL tracking.
+// FillLeg records per-leg fill details for notional accounting.
+type FillLeg struct {
+	Venue            string  `json:"venue"`
+	Action           string  `json:"action"`
+	FilledNotionalUSD float64 `json:"filled_notional_usd"`
+	FilledPrice       float64 `json:"filled_price"`
+}
+
 type SimulatedFill struct {
-	IntentID              string  `json:"intent_id"`
-	Strategy              string  `json:"strategy"`
-	Symbol                string  `json:"symbol"`
+	IntentID              string    `json:"intent_id"`
+	Strategy              string    `json:"strategy"`
+	Symbol                string    `json:"symbol"`
+	Legs                  []FillLeg `json:"legs,omitempty"` // per-leg fill details
 	TsSignalMs            int64   `json:"ts_signal_ms"`
 	TsFillSimulatedMs     int64   `json:"ts_fill_simulated_ms"`
 	LatencyMs             int64   `json:"latency_ms"`

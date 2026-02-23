@@ -173,10 +173,22 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 		edgeAtFill = edgeAtSignal * 0.8
 	}
 
+	// Build per-leg summary for notional accounting by the allocator.
+	fillLegs := make([]FillLeg, len(events))
+	for i, ev := range events {
+		fillLegs[i] = FillLeg{
+			Venue:             ev.Venue,
+			Action:            ev.Action,
+			FilledNotionalUSD: ev.FilledNotionalUSD,
+			FilledPrice:       ev.FilledPrice,
+		}
+	}
+
 	fill := &SimulatedFill{
 		IntentID:                 intent.IntentID,
 		Strategy:                 intent.Strategy,
 		Symbol:                   intent.Symbol,
+		Legs:                     fillLegs,
 		TsSignalMs:               intent.TsMs,
 		TsFillSimulatedMs:        fillTs,
 		LatencyMs:                latencyMs,

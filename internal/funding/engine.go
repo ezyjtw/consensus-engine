@@ -25,14 +25,15 @@ type venueData struct {
 
 // Engine evaluates funding strategies and emits trade intents.
 type Engine struct {
-	policy  *Policy
-	mu      sync.RWMutex
+	policy     *Policy
+	mu         sync.RWMutex
 	// state[symbol][venue]
-	state   map[string]map[string]*venueData
+	state      map[string]map[string]*venueData
 	// cooldown: intentKey → last emitted unix ms
-	cooldown map[string]int64
-	Emitted  map[string]int
-	Rejected map[string]int
+	cooldown   map[string]int64
+	Emitted    map[string]int
+	Rejected   map[string]int
+	forecaster *RegimeForecaster
 }
 
 func NewEngine(p *Policy) *Engine {
@@ -41,11 +42,12 @@ func NewEngine(p *Policy) *Engine {
 		state[sym] = make(map[string]*venueData)
 	}
 	return &Engine{
-		policy:   p,
-		state:    state,
-		cooldown: make(map[string]int64),
-		Emitted:  make(map[string]int),
-		Rejected: make(map[string]int),
+		policy:     p,
+		state:      state,
+		cooldown:   make(map[string]int64),
+		Emitted:    make(map[string]int),
+		Rejected:   make(map[string]int),
+		forecaster: NewRegimeForecaster(0.15),
 	}
 }
 
@@ -67,6 +69,8 @@ func (e *Engine) UpdateQuote(q consensus.Quote) {
 	}
 	if q.FundingRate != 0 {
 		d.fundingRate = q.FundingRate
+		// Update the regime forecaster whenever a new funding rate arrives.
+		e.forecaster.Update(ven, sym, q.FundingRate, q.TsMs)
 	}
 	if q.Mark > 0 {
 		d.markPrice = q.Mark
@@ -75,6 +79,12 @@ func (e *Engine) UpdateQuote(q consensus.Quote) {
 		d.feeBpsTaker = q.FeeBpsTaker
 	}
 	d.updatedMs = q.TsMs
+}
+
+// Regime returns the current regime snapshot for a venue+symbol pair.
+// Returns nil if no funding rate data has been seen yet for that pair.
+func (e *Engine) Regime(venue, symbol string) *Regime {
+	return e.forecaster.Get(venue, symbol)
 }
 
 // Evaluate checks all configured strategies and returns any qualifying intents.
@@ -93,6 +103,15 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 			if d.markPrice == 0 || d.fundingRate == 0 {
 				continue
 			}
+
+			// Skip if the regime is VOLATILE — funding direction is too uncertain.
+			if r := e.forecaster.Get(ven, sym); r != nil && r.Label == "VOLATILE" {
+				e.Rejected["carry_volatile_regime"]++
+				log.Printf("funding: CARRY skipped sym=%s venue=%s regime=VOLATILE stddev=%.6f ewa=%.6f",
+					sym, ven, r.StdDev, r.EWA)
+				continue
+			}
+
 			// Annualised gross yield (%) from 8h funding: rate × 3 × 365 × 100
 			annualGrossPct := d.fundingRate * 3 * 365 * 100
 			// Cost: 2 entry legs × taker fee (spot buy + perp short).
@@ -135,20 +154,30 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 					continue
 				}
 
-				rA, rB := dA.fundingRate, dB.fundingRate
-				// Ensure vB has the higher rate (we short vB, long vA).
-				if rA > rB {
-					vA, vB = vB, vA
-					dA, dB = dB, dA
-					rA, rB = rB, rA
+				// Skip if either venue's regime is VOLATILE — spread direction unreliable.
+				rA := e.forecaster.Get(vA, sym)
+				rB := e.forecaster.Get(vB, sym)
+				if (rA != nil && rA.Label == "VOLATILE") || (rB != nil && rB.Label == "VOLATILE") {
+					e.Rejected["diff_volatile_regime"]++
+					log.Printf("funding: DIFF skipped sym=%s venues=%s/%s regime=VOLATILE",
+						sym, vA, vB)
+					continue
 				}
 
-				diffBps := (rB - rA) * 10000 // in bps
+				rateA, rateB := dA.fundingRate, dB.fundingRate
+				// Ensure vB has the higher rate (we short vB, long vA).
+				if rateA > rateB {
+					vA, vB = vB, vA
+					dA, dB = dB, dA
+					rateA, rateB = rateB, rateA
+				}
+
+				diffBps := (rateB - rateA) * 10000 // in bps
 				if diffBps < e.policy.MinDifferentialBps8h {
 					continue
 				}
 
-				annualGrossPct := (rB - rA) * 3 * 365 * 100
+				annualGrossPct := (rateB - rateA) * 3 * 365 * 100
 				feePct := (dA.feeBpsTaker+dB.feeBpsTaker) * 2 / 10000 * 100
 				annualNetPct := annualGrossPct - feePct
 				threshold := e.minYield(annualNetPct)

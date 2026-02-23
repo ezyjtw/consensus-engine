@@ -23,6 +23,7 @@ type RedisPolicy struct {
 	UseTLS        bool   `yaml:"use_tls"`
 	InputStream   string `yaml:"input_stream"`    // trade:intents
 	OutputStream  string `yaml:"output_stream"`   // trade:intents:approved
+	FillsStream   string `yaml:"fills_stream"`    // demo:fills | live:fills for notional release
 	ConsumerGroup string `yaml:"consumer_group"`
 	ConsumerName  string `yaml:"consumer_name"`
 	BlockMs       int64  `yaml:"block_ms"`

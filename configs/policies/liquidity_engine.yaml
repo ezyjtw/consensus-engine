@@ -1,0 +1,40 @@
+# Liquidity Inefficiency Engine — signal detection thresholds
+# Strategy: SPREAD_CAPTURE | LIQUIDATION_CONTRA
+
+# Spread blowout: trigger when spread > this multiple of rolling baseline.
+spread_blowout_mult: 3.0
+# How many samples to use for the rolling spread baseline.
+spread_baseline_samples: 50
+
+# Thin book: trigger when 1%-depth notional drops below this (USD).
+thin_book_threshold_usd: 100000
+
+# Mark/index divergence threshold (bps). Deribit often shows this.
+mark_index_diverge_bps: 20
+
+# Order book imbalance: bid_depth/ask_depth > this (or < 1/this).
+imbalance_ratio: 5.0
+
+# Liquidation cascade proxy: require ≥ this price move (bps) within 60s.
+liq_cascade_price_bps: 30
+
+# Notional per intent (USD).
+spread_capture_notional_usd: 5000
+liq_contra_notional_usd: 2500
+
+# Cooldown between intents per venue+symbol (ms).
+cooldown_ms: 5000
+
+# Minimum consensus quality to emit intents (LOW | MED | HIGH).
+min_consensus_quality: HIGH
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  use_tls: false
+  input_stream: "market:quotes"
+  output_intents: "trade:intents"
+  consumer_group: "liquidity-engine"
+  consumer_name: "worker-1"
+  block_ms: 500
+  batch_size: 100

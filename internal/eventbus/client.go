@@ -125,6 +125,16 @@ func (c *StreamClient) HGetAll(ctx context.Context, key string) (map[string]stri
 	return c.rdb.HGetAll(ctx, key).Result()
 }
 
+// Keys returns all Redis keys matching the given glob pattern.
+func (c *StreamClient) Keys(ctx context.Context, pattern string) ([]string, error) {
+	return c.rdb.Keys(ctx, pattern).Result()
+}
+
+// MGet returns the string values for the given keys (nil interface{} for missing keys).
+func (c *StreamClient) MGet(ctx context.Context, keys ...string) ([]interface{}, error) {
+	return c.rdb.MGet(ctx, keys...).Result()
+}
+
 // Ping verifies connectivity.
 func (c *StreamClient) Ping(ctx context.Context) error {
 	return c.rdb.Ping(ctx).Err()
