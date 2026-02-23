@@ -127,7 +127,7 @@ func (s *Server) resolveKey(r *http.Request) *auth.APIKey {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(indexHTML)
+	_, _ = w.Write(indexHTML)
 }
 
 // --- Connections ---
@@ -223,7 +223,7 @@ func (s *Server) handleActivateKill(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
-	json.NewDecoder(r.Body).Decode(&req) // reason is optional
+	_ = json.NewDecoder(r.Body).Decode(&req) // reason is optional
 	if err := s.store.SetKillSwitch(r.Context(), true, req.Reason); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -258,13 +258,13 @@ func (s *Server) handleDeactivateKill(w http.ResponseWriter, r *http.Request) {
 
 func jsonOK(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func jsonErr(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 func isKnown(exchange string) bool {

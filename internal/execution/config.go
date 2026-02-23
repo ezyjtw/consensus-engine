@@ -12,6 +12,7 @@ type Config struct {
 	SimSlippageBps     float64    `yaml:"sim_slippage_bps"`
 	SimLatencyMs       int64      `yaml:"sim_latency_ms"`
 	AdverseSelBps      float64    `yaml:"adverse_selection_bps"`
+	MaxOrdersPerMinute int        `yaml:"max_orders_per_minute"`
 	TenantID           string     `yaml:"tenant_id"`
 	Redis              RedisConf  `yaml:"redis"`
 }
@@ -61,6 +62,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if c.AdverseSelBps == 0 {
 		c.AdverseSelBps = 10.0
+	}
+	if c.MaxOrdersPerMinute == 0 {
+		c.MaxOrdersPerMinute = 120 // 2 orders/sec default
 	}
 	if c.TenantID == "" {
 		c.TenantID = "default"

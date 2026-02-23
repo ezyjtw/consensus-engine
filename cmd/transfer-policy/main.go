@@ -42,7 +42,7 @@ func main() {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
 			return
 		}
 		if req.RequestedAt.IsZero() {
@@ -53,13 +53,13 @@ func main() {
 		if decision.Status == transfer.StatusDenied {
 			w.WriteHeader(http.StatusForbidden)
 		}
-		json.NewEncoder(w).Encode(decision)
+		_ = json.NewEncoder(w).Encode(decision)
 	})
 
 	// GET /health — liveness probe.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":             "ok",
 			"config_hash":        cfg.Hash(),
 			"manual_approval":    cfg.ManualApprovalRequired,

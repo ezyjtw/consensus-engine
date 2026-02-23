@@ -54,6 +54,9 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	s.mux.HandleFunc("GET /api/intents", s.auth(gw.handleGetIntents))
 	s.mux.HandleFunc("GET /api/orders", s.auth(gw.handleGetOrders))
 
+	// Live prices
+	s.mux.HandleFunc("GET /api/prices", s.auth(gw.handleGetPrices))
+
 	// Funding rates
 	s.mux.HandleFunc("GET /api/funding/rates", s.auth(gw.handleGetFundingRates))
 
@@ -294,6 +297,44 @@ func (gw *Gateway) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, rows)
+}
+
+// ── Live prices ──────────────────────────────────────────────────────────
+
+// handleGetPrices returns the latest price per venue+symbol from the
+// market:quotes Redis stream. Serves as a REST fallback when the SSE
+// connection has not delivered consensus events yet.
+func (gw *Gateway) handleGetPrices(w http.ResponseWriter, r *http.Request) {
+	msgs, err := gw.rdb.XRevRangeN(r.Context(), "market:quotes", "+", "-", 200).Result()
+	if err != nil {
+		jsonOK(w, map[string]interface{}{})
+		return
+	}
+	latest := make(map[string]map[string]interface{})
+	for _, m := range msgs {
+		raw, ok := m.Values["data"].(string)
+		if !ok {
+			continue
+		}
+		var q map[string]interface{}
+		if err := json.Unmarshal([]byte(raw), &q); err != nil {
+			continue
+		}
+		venue, _ := q["venue"].(string)
+		symbol, _ := q["symbol"].(string)
+		key := venue + ":" + symbol
+		if _, seen := latest[key]; !seen {
+			latest[key] = map[string]interface{}{
+				"venue":    venue,
+				"symbol":   symbol,
+				"best_bid": q["best_bid"],
+				"best_ask": q["best_ask"],
+				"mark":     q["mark"],
+				"ts_ms":    q["ts_ms"],
+			}
+		}
+	}
+	jsonOK(w, latest)
 }
 
 // ── Funding rates ─────────────────────────────────────────────────────────

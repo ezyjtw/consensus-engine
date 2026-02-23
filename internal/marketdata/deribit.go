@@ -80,8 +80,6 @@ type deribitTickerData struct {
 	Timestamp      int64   `json:"timestamp"`
 }
 
-type deribitBookEntry = [3]interface{} // ["new"/"change"/"delete", price, amount]
-
 type deribitBookData struct {
 	Timestamp      int64             `json:"timestamp"`
 	InstrumentName string            `json:"instrument_name"`

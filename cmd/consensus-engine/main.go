@@ -12,6 +12,7 @@ import (
 
         "github.com/ezyjtw/consensus-engine/internal/consensus"
         "github.com/ezyjtw/consensus-engine/internal/eventbus"
+        "github.com/ezyjtw/consensus-engine/internal/redact"
         "github.com/ezyjtw/consensus-engine/internal/store"
 )
 
@@ -21,7 +22,7 @@ func main() {
         flag.Parse()
 
         if addr := os.Getenv("REDIS_ADDR"); addr != "" {
-                log.Printf("REDIS_ADDR detected: %s", addr)
+                log.Printf("REDIS_ADDR detected: %s", redact.RedisAddr(addr))
         } else {
                 log.Println("REDIS_ADDR not set, using default from policy file")
         }
@@ -52,7 +53,7 @@ func main() {
                 strings.Join(policy.CoreVenues, ","),
                 policy.Redis.UseTLS,
         )
-        log.Printf("Redis address: %s", policy.Redis.Addr)
+        log.Printf("Redis address: %s", redact.RedisAddr(policy.Redis.Addr))
 
         quoteStore := store.New(policy.StaleMs)
         engine := consensus.NewEngine(policy)

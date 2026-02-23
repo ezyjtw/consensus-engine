@@ -56,7 +56,10 @@ type PaperExecutor struct {
 	cfg        *Config
 	priceCache *PriceCache
 	// positions: "venue:symbol:market" → *posEntry
-	positions  sync.Map
+	positions sync.Map
+	// orderTs tracks recent order timestamps for rate limiting.
+	orderMu sync.Mutex
+	orderTs []int64
 }
 
 func NewPaperExecutor(cfg *Config, cache *PriceCache) *PaperExecutor {
@@ -67,6 +70,21 @@ func NewPaperExecutor(cfg *Config, cache *PriceCache) *PaperExecutor {
 // Returns execution events for each leg and a single SimulatedFill summary.
 func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]ExecutionEvent, *SimulatedFill) {
 	now := time.Now().UnixMilli()
+
+	// Rate limit: reject if order rate exceeds MaxOrdersPerMinute.
+	if e.cfg.MaxOrdersPerMinute > 0 && !e.tryAcquireOrderSlot(now) {
+		log.Printf("paper: rate limited intent %s (max %d orders/min)",
+			intent.IntentID, e.cfg.MaxOrdersPerMinute)
+		return []ExecutionEvent{{
+			EventType: "ORDER_REJECTED",
+			IntentID:  intent.IntentID,
+			Strategy:  intent.Strategy,
+			Symbol:    intent.Symbol,
+			TsMs:      now,
+			TenantID:  e.cfg.TenantID,
+			Mode:      e.cfg.TradingMode,
+		}}, nil
+	}
 
 	// Check intent has not expired.
 	if now > intent.ExpiresMs {
@@ -238,6 +256,25 @@ func (e *PaperExecutor) PositionJSON() map[string]interface{} {
 		return true
 	})
 	return out
+}
+
+// tryAcquireOrderSlot checks whether another order is allowed under the
+// per-minute rate limit. Returns true and records the timestamp on success.
+func (e *PaperExecutor) tryAcquireOrderSlot(nowMs int64) bool {
+	e.orderMu.Lock()
+	defer e.orderMu.Unlock()
+	cutoff := nowMs - 60_000
+	// Prune entries older than 1 minute.
+	i := 0
+	for i < len(e.orderTs) && e.orderTs[i] < cutoff {
+		i++
+	}
+	e.orderTs = e.orderTs[i:]
+	if len(e.orderTs) >= e.cfg.MaxOrdersPerMinute {
+		return false
+	}
+	e.orderTs = append(e.orderTs, nowMs)
+	return true
 }
 
 // MarshalFill serialises a SimulatedFill to JSON bytes.

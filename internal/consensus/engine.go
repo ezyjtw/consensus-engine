@@ -26,6 +26,30 @@ func (e *Engine) Compute(
 	nowMs := time.Now().UnixMilli()
 	p := e.policy
 
+	// Stale data pause: if every quote is older than StalePauseMs, return an
+	// empty consensus with quality=LOW to prevent downstream use of stale prices.
+	if p.StalePauseMs > 0 {
+		allStale := true
+		for _, q := range quotes {
+			if nowMs-q.TsMs < p.StalePauseMs {
+				allStale = false
+				break
+			}
+		}
+		if allStale {
+			return ComputeResult{
+				Update: ConsensusUpdate{
+					TenantID:        tenantID,
+					Symbol:          symbol,
+					TsMs:            nowMs,
+					SizeNotionalUSD: p.SizeNotionalUSD,
+					Consensus:       Consensus{Quality: "LOW"},
+				},
+				NewStatuses: make(map[Venue]VenueStatus),
+			}
+		}
+	}
+
 	type venueRaw struct {
 		venue           Venue
 		quote           Quote

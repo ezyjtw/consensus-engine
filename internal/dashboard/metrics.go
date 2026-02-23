@@ -187,5 +187,5 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	w.Write(buf)
+	_, _ = w.Write(buf)
 }
