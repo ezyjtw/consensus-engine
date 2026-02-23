@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yourorg/arbsuite/internal/arb"
+	"github.com/yourorg/arbsuite/internal/consensus"
 	"github.com/yourorg/arbsuite/internal/execution"
 	"github.com/yourorg/arbsuite/internal/risk"
 )
@@ -198,4 +199,33 @@ func newUUID() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// WriteVenueStatus appends a venue state transition to venue_status_history.
+func (db *DB) WriteVenueStatus(ctx context.Context, su consensus.VenueStatusUpdate, prevState string) error {
+	_, err := db.pool.Exec(ctx,
+		`INSERT INTO venue_status_history (tenant_id, venue, symbol, from_state, to_state, reason, ts)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		su.TenantID, string(su.Venue), string(su.Symbol),
+		prevState, string(su.Status), su.Reason,
+		time.UnixMilli(su.TsMs).UTC(),
+	)
+	return err
+}
+
+// LatestVenueStates returns the most recent state for every venue/symbol pair.
+// Used by the consensus engine to restore trust state after a restart.
+func (db *DB) LatestVenueStates(ctx context.Context, tenantID string) ([]map[string]interface{}, error) {
+	rows, err := db.pool.Query(ctx,
+		`SELECT DISTINCT ON (tenant_id, venue, symbol)
+		        tenant_id, venue, symbol, to_state AS state, reason, ts
+		 FROM venue_status_history
+		 WHERE tenant_id = $1
+		 ORDER BY tenant_id, venue, symbol, ts DESC`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows), nil
 }

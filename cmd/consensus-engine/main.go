@@ -83,6 +83,31 @@ func main() {
                 os.Interrupt, syscall.SIGTERM)
         defer cancel()
 
+        // ── Restart recovery ────────────────────────────────────────────────────
+        // Reload the last-known venue state from the Redis cache written by
+        // PublishStatusUpdate. This restores blacklist/warn state across restarts.
+        const tenantDefault = "default"
+        restoredCount := 0
+        for _, sym := range policy.Symbols {
+                for venueName := range policy.BaseTrust {
+                        sv := bus.LoadVenueState(ctx, tenantDefault,
+                                consensus.Venue(venueName), consensus.Symbol(sym))
+                        if sv == nil {
+                                continue
+                        }
+                        vs := consensus.VenueStatus{State: sv.Status, Reason: sv.Reason}
+                        if sv.Status == consensus.StateBlacklisted && sv.TtlMs > 0 {
+                                vs.BlacklistUntilMs = sv.TsMs + sv.TtlMs
+                        }
+                        quoteStore.SetStatus(tenantDefault, consensus.Symbol(sym),
+                                consensus.Venue(venueName), vs)
+                        restoredCount++
+                }
+        }
+        if restoredCount > 0 {
+                log.Printf("consensus-engine: restored %d venue states from Redis cache", restoredCount)
+        }
+
         log.Println("consensus-engine started...")
 
         type symKey struct {

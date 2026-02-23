@@ -13,11 +13,19 @@ import (
 	"github.com/yourorg/arbsuite/internal/consensus"
 )
 
+// posEntry is the value stored in PaperExecutor.positions.
+// Defined at package scope so type assertions work correctly across methods.
+type posEntry struct {
+	qty        float64
+	entryPrice float64
+	notional   float64
+}
+
 // PriceCache holds the latest consensus mid price per symbol.
 type PriceCache struct {
 	mu    sync.RWMutex
-	mids  map[string]float64 // canonical symbol → mid
-	bands map[string][2]float64 // low, high
+	mids  map[string]float64
+	bands map[string][2]float64
 }
 
 func NewPriceCache() *PriceCache {
@@ -46,7 +54,7 @@ func (pc *PriceCache) Mid(symbol string) (float64, bool) {
 type PaperExecutor struct {
 	cfg        *Config
 	priceCache *PriceCache
-	// positions: "venue:symbol:market" → notional (positive = long, negative = short)
+	// positions: "venue:symbol:market" → *posEntry
 	positions  sync.Map
 }
 
@@ -100,28 +108,20 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 			sellPrice = fillPrice
 		}
 
-		// Check price limit.
+		// Enforce price limit.
 		if leg.PriceLimit > 0 {
 			if leg.Action == "BUY" && fillPrice > leg.PriceLimit {
-				log.Printf("paper: leg %d BUY fill=%.2f > limit=%.2f — price limit breached",
-					i, fillPrice, leg.PriceLimit)
-				fillPrice = leg.PriceLimit // still fill but at limit
+				fillPrice = leg.PriceLimit
 			}
 			if leg.Action == "SELL" && fillPrice < leg.PriceLimit {
-				log.Printf("paper: leg %d SELL fill=%.2f < limit=%.2f — price limit breached",
-					i, fillPrice, leg.PriceLimit)
 				fillPrice = leg.PriceLimit
 			}
 		}
 
 		slippageActual := math.Abs(fillPrice-mid) / mid * 10000
-		feesUSD := leg.NotionalUSD * leg.MaxSlippageBps / 10000 / 2 // approximate
-		if feesUSD == 0 {
-			feesUSD = leg.NotionalUSD * 4 / 10000 // default 4bps
-		}
+		feesUSD := leg.NotionalUSD * 4 / 10000 // 4bps taker
 		totalFees += feesUSD
 
-		// Check for adverse selection: did mid move against us by more than threshold?
 		if slippageActual > e.cfg.AdverseSelBps {
 			adverseSelection = true
 		}
@@ -132,24 +132,24 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 		}
 
 		events = append(events, ExecutionEvent{
-			EventType:            "ORDER_FILLED",
-			IntentID:             intent.IntentID,
-			LegIndex:             i,
-			Venue:                leg.Venue,
-			Symbol:               intent.Symbol,
-			Action:               leg.Action,
-			Strategy:             intent.Strategy,
-			Market:               market,
-			RequestedNotionalUSD: leg.NotionalUSD,
-			FilledNotionalUSD:    leg.NotionalUSD,
-			FilledPrice:          fillPrice,
-			SlippageBpsActual:    slippageActual,
-			SlippageBpsAllowed:   leg.MaxSlippageBps,
-			FeesUSDActual:        feesUSD,
-			TsMs:                 fillTs,
+			EventType:             "ORDER_FILLED",
+			IntentID:              intent.IntentID,
+			LegIndex:              i,
+			Venue:                 leg.Venue,
+			Symbol:                intent.Symbol,
+			Action:                leg.Action,
+			Strategy:              intent.Strategy,
+			Market:                market,
+			RequestedNotionalUSD:  leg.NotionalUSD,
+			FilledNotionalUSD:     leg.NotionalUSD,
+			FilledPrice:           fillPrice,
+			SlippageBpsActual:     slippageActual,
+			SlippageBpsAllowed:    leg.MaxSlippageBps,
+			FeesUSDActual:         feesUSD,
+			TsMs:                  fillTs,
 			LatencySignalToFillMs: latencyMs,
-			TenantID:             e.cfg.TenantID,
-			Mode:                 e.cfg.TradingMode,
+			TenantID:              e.cfg.TenantID,
+			Mode:                  e.cfg.TradingMode,
 		})
 
 		// Update virtual position.
@@ -161,52 +161,45 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 		e.updatePosition(posKey, qty, fillPrice, leg.NotionalUSD)
 	}
 
-	// Compute fill PnL (sell value − buy cost − fees).
 	netPnL := 0.0
 	if buyPrice > 0 && sellPrice > 0 {
-		// Two-leg: PnL = (sell_price - buy_price) × notional / mid − fees
 		notional := intent.Legs[0].NotionalUSD
 		netPnL = (sellPrice-buyPrice)/mid*notional - totalFees
 	}
 
 	edgeAtSignal := intent.Expected.EdgeBpsNet
-	edgeAtFill := edgeAtSignal // simplified: no price movement model in V1
+	edgeAtFill := edgeAtSignal
 	if adverseSelection {
-		edgeAtFill = edgeAtSignal * 0.8 // degraded edge
+		edgeAtFill = edgeAtSignal * 0.8
 	}
 
 	fill := &SimulatedFill{
-		IntentID:              intent.IntentID,
-		Strategy:              intent.Strategy,
-		Symbol:                intent.Symbol,
-		TsSignalMs:            intent.TsMs,
-		TsFillSimulatedMs:     fillTs,
-		LatencyMs:             latencyMs,
-		EdgeAtSignalBps:       edgeAtSignal,
-		EdgeAtFillBps:         edgeAtFill,
-		EdgeCapturedBps:       edgeAtFill,
+		IntentID:                 intent.IntentID,
+		Strategy:                 intent.Strategy,
+		Symbol:                   intent.Symbol,
+		TsSignalMs:               intent.TsMs,
+		TsFillSimulatedMs:        fillTs,
+		LatencyMs:                latencyMs,
+		EdgeAtSignalBps:          edgeAtSignal,
+		EdgeAtFillBps:            edgeAtFill,
+		EdgeCapturedBps:          edgeAtFill,
 		AdverseSelectionOccurred: adverseSelection,
-		FillPriceBuy:          buyPrice,
-		FillPriceSell:         sellPrice,
-		FeesAssumedUSD:        totalFees,
-		SlippageAssumedBps:    slipBps,
-		NetPnLUSD:             netPnL,
-		IntentExpired:         false,
-		Mode:                  e.cfg.TradingMode,
-		TenantID:              e.cfg.TenantID,
+		FillPriceBuy:             buyPrice,
+		FillPriceSell:            sellPrice,
+		FeesAssumedUSD:           totalFees,
+		SlippageAssumedBps:       slipBps,
+		NetPnLUSD:                netPnL,
+		IntentExpired:            false,
+		Mode:                     e.cfg.TradingMode,
+		TenantID:                 e.cfg.TenantID,
 	}
 
 	return events, fill
 }
 
 func (e *PaperExecutor) updatePosition(key string, qty, price, notional float64) {
-	type posEntry struct {
-		qty        float64
-		entryPrice float64
-		notional   float64
-	}
 	actual, _ := e.positions.LoadOrStore(key, &posEntry{})
-	pos := actual.(*posEntry)
+	pos := actual.(*posEntry) // safe: all stored values are *posEntry (package-level type)
 	pos.qty += qty
 	pos.notional += notional
 	if pos.qty != 0 {
@@ -214,16 +207,11 @@ func (e *PaperExecutor) updatePosition(key string, qty, price, notional float64)
 	}
 }
 
-// PositionJSON returns all current virtual positions as a JSON-serialisable map.
+// PositionJSON returns all current virtual positions as a serialisable map.
 func (e *PaperExecutor) PositionJSON() map[string]interface{} {
 	out := make(map[string]interface{})
 	e.positions.Range(func(k, v interface{}) bool {
-		type posEntry struct {
-			qty        float64
-			entryPrice float64
-			notional   float64
-		}
-		if p, ok := v.(*posEntry); ok {
+		if p, ok := v.(*posEntry); ok { // same package-level type — assertion always succeeds
 			out[k.(string)] = map[string]float64{
 				"qty":         p.qty,
 				"entry_price": p.entryPrice,
