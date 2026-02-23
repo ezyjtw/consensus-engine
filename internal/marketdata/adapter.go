@@ -49,13 +49,6 @@ func (qs *quoteState) update(fn func(q *consensus.Quote)) consensus.Quote {
 	return qs.quote
 }
 
-// get returns a snapshot of the current quote.
-func (qs *quoteState) get() consensus.Quote {
-	qs.mu.Lock()
-	defer qs.mu.Unlock()
-	return qs.quote
-}
-
 // computeDepths sums notional (price × quantity) available within 1% of the
 // best bid / ask price. Returns values in quote currency (e.g. USD).
 func computeDepths(bids, asks [][2]float64, bestBid, bestAsk float64) (bidDepth1Pct, askDepth1Pct float64) {

@@ -774,6 +774,7 @@ async function boot() {
   // V3: fetch role and branding concurrently.
   await Promise.allSettled([fetchRole(), fetchBranding()]);
   connectSSE();
+  fetchInitialPrices();
   loadConnections();
   loadAlerts();
   switchTab('home');
@@ -906,10 +907,11 @@ function connectSSE() {
 
 function dispatch(type, data) {
   switch (type) {
-    case 'consensus':   handleConsensus(data); break;
-    case 'anomaly':     handleAnomaly(data); break;
-    case 'status':      handleStatus(data); break;
-    case 'kill_switch': handleKillSwitch(data); break;
+    case 'consensus':    handleConsensus(data); break;
+    case 'anomaly':      handleAnomaly(data); break;
+    case 'status':       handleStatus(data); break;
+    case 'kill_switch':  handleKillSwitch(data); break;
+    case 'market_quote': handleMarketQuote(data); break;
   }
 }
 
@@ -947,6 +949,43 @@ function handleConsensus(d) {
   }
 
   if (sym === S.activeSymbol) renderConsensus();
+}
+
+// Handle raw market quotes streamed via SSE from market:quotes.
+// Updates the price feed even when consensus engine is delayed.
+function handleMarketQuote(d) {
+  if (!d || !d.venue || !d.symbol) return;
+  const mid = (d.best_bid && d.best_ask) ? (d.best_bid + d.best_ask) / 2 : d.mark || 0;
+  if (mid <= 0) return;
+  const key = d.venue + ':' + d.symbol;
+  const existing = S.priceLatest[key];
+  // Only update if this quote is newer.
+  if (!existing || (d.ts_ms && d.ts_ms > existing.ts_ms)) {
+    S.priceLatest[key] = { price: mid, ts_ms: d.ts_ms || Date.now() };
+    if (S.activeTab === 'home') renderPriceFeed();
+  }
+}
+
+// Fetch initial prices from REST API so the price table is populated
+// immediately, before waiting for SSE events.
+async function fetchInitialPrices() {
+  try {
+    const h = S.token ? { 'Authorization': 'Bearer ' + S.token } : {};
+    const resp = await fetch('/api/prices', { headers: h });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    for (const [key, q] of Object.entries(data)) {
+      const mid = (q.best_bid && q.best_ask) ? (q.best_bid + q.best_ask) / 2 : q.mark || 0;
+      if (mid <= 0) continue;
+      const existing = S.priceLatest[key];
+      if (!existing || (q.ts_ms && q.ts_ms > existing.ts_ms)) {
+        S.priceLatest[key] = { price: mid, ts_ms: q.ts_ms || Date.now() };
+      }
+    }
+    renderPriceFeed();
+  } catch (e) {
+    console.log('fetchInitialPrices:', e);
+  }
 }
 
 function renderConsensus() {

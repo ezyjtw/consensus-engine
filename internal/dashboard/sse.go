@@ -31,6 +31,7 @@ var redisStreams = []string{
 	"consensus:updates",
 	"consensus:anomalies",
 	"consensus:status",
+	"market:quotes",
 }
 
 func (h *StreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +144,8 @@ func streamEventType(stream string) string {
 		return "anomaly"
 	case "consensus:status":
 		return "status"
+	case "market:quotes":
+		return "market_quote"
 	default:
 		return "unknown"
 	}
