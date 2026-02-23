@@ -57,6 +57,9 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	// Funding rates
 	s.mux.HandleFunc("GET /api/funding/rates", s.auth(gw.handleGetFundingRates))
 
+	// Equity curve (cumulative PnL time series)
+	s.mux.HandleFunc("GET /api/equity-curve", s.auth(gw.handleGetEquityCurve))
+
 	// Paper trading mode
 	s.mux.HandleFunc("GET /api/paper/mode", s.auth(gw.handleGetPaperMode))
 	s.mux.HandleFunc("PUT /api/paper/mode", s.authRole(auth.RoleTrader, gw.handleSetPaperMode))
@@ -329,6 +332,108 @@ func (gw *Gateway) handleGetFundingRates(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	jsonOK(w, result)
+}
+
+// ── Equity curve ──────────────────────────────────────────────────────────
+
+// handleGetEquityCurve returns a time-series of cumulative PnL snapshots suitable
+// for charting. It builds the curve from the demo:fills Redis stream, so it works
+// in paper mode without Postgres. When Postgres is connected the fills table is
+// used instead for a more complete and persistent history.
+func (gw *Gateway) handleGetEquityCurve(w http.ResponseWriter, r *http.Request) {
+	// How many recent fills to include in the curve (configurable via ?limit=).
+	count, _ := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64)
+	if count <= 0 || count > 10000 {
+		count = 500
+	}
+
+	type point struct {
+		TsMs      int64   `json:"ts_ms"`
+		CumPnL    float64 `json:"cum_pnl_usd"`
+		FillPnL   float64 `json:"fill_pnl_usd"`
+		Strategy  string  `json:"strategy"`
+		FillCount int     `json:"fill_count"`
+	}
+
+	var points []point
+	var cumPnL float64
+	fillCount := 0
+
+	// Prefer Postgres if available.
+	if gw.db != nil {
+		rows, err := gw.db.RecentFills(r.Context(), gw.tenantID, int(count))
+		if err == nil {
+			// rows are newest-first; reverse to get oldest-first for the curve.
+			for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+				rows[i], rows[j] = rows[j], rows[i]
+			}
+			for _, row := range rows {
+				fillCount++
+				pnl, _ := row["net_pnl_usd"].(float64)
+				cumPnL += pnl
+				ts, _ := row["ts"].(int64)
+				strategy, _ := row["strategy"].(string)
+				points = append(points, point{
+					TsMs:      ts,
+					CumPnL:    cumPnL,
+					FillPnL:   pnl,
+					Strategy:  strategy,
+					FillCount: fillCount,
+				})
+			}
+			jsonOK(w, map[string]interface{}{
+				"points":    points,
+				"total_pnl": cumPnL,
+				"source":    "postgres",
+			})
+			return
+		}
+	}
+
+	// Fall back to Redis demo fills stream.
+	stream := "demo:fills:" + gw.tenantID
+	msgs, err := gw.rdb.XRangeN(r.Context(), stream, "-", "+", count).Result()
+	if err != nil {
+		jsonOK(w, map[string]interface{}{
+			"points":    []interface{}{},
+			"total_pnl": 0,
+			"source":    "redis",
+			"note":      "no fills data yet",
+		})
+		return
+	}
+
+	for _, m := range msgs {
+		raw, ok := m.Values["data"].(string)
+		if !ok {
+			continue
+		}
+		var fill map[string]interface{}
+		if json.Unmarshal([]byte(raw), &fill) != nil {
+			continue
+		}
+		fillCount++
+		pnl, _ := fill["net_pnl_usd"].(float64)
+		cumPnL += pnl
+		tsMs, _ := fill["ts_fill_simulated_ms"].(float64)
+		if tsMs == 0 {
+			tsMs, _ = fill["ts_ms"].(float64)
+		}
+		strategy, _ := fill["strategy"].(string)
+		points = append(points, point{
+			TsMs:      int64(tsMs),
+			CumPnL:    cumPnL,
+			FillPnL:   pnl,
+			Strategy:  strategy,
+			FillCount: fillCount,
+		})
+	}
+
+	jsonOK(w, map[string]interface{}{
+		"points":    points,
+		"total_pnl": cumPnL,
+		"source":    "redis",
+	})
 }
 
 // ── Paper trading mode ────────────────────────────────────────────────────

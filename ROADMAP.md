@@ -856,12 +856,42 @@ Flatten sequence (always executed by Risk Daemon independently):
 
 ## 6. V1 → V3 Roadmap
 
+### V1 — Close the money loop ✅ COMPLETE
 ### V1 — Close the money loop ✅ ~85% complete
 
 **Goal:** End-to-end flow: live data → consensus → arb/funding intents → paper execution → PnL
 
 | # | Component | Status |
 |---|---|---|
+| 1 | **Market Data Service** (exchange WS connectors) | ✅ Done |
+| 2 | **Paper Trading Service** (pure simulation) | ✅ Done |
+| 3 | **Ledger** (Redis-backed; Postgres schema ready) | ✅ Done |
+| 4 | **Docker Compose** (full local stack) | ✅ Done |
+| 5 | **Funding Engine** (carry + differential) | ✅ Done |
+| 6 | **Execution Router** (two-leg safe execution, paper mode) | ✅ Done |
+| 7 | **Risk Daemon** (continuous metrics + PAUSE/SAFE/FLATTEN) | ✅ Done |
+| 8 | **Capital Allocator** (caps + quality gating + fractional Kelly) | ✅ Done |
+| 9 | **Gateway API** (positions, PnL, intents, risk, equity curve) | ✅ Done |
+| 10 | **Dashboard** (all 11 tabs, equity curve, mode badge, paper badge) | ✅ Done |
+
+### V2 — Yield expansion + automation (next priority)
+
+- **Liquidity Inefficiency Engine** (spread capture + liquidation contra) — framework exists
+- **Postgres wiring** — activate persistence with `PG_DSN` env var
+- **Prometheus + Grafana** — wire `/metrics` endpoint into compose stack
+- **Smarter execution** — IOC/limit choice, depth-sensitive sequencing
+- **Automated rebalancing** — velocity-limited transfers with strict policy enforcement
+- **Funding regime forecasting** — OI + momentum model
+- **Cross-chain arbitrage** — ~100 operators, 0.3–5% spreads, 30s–15min windows
+
+### V3 — Institutional polish + white-label readiness ✅ COMPLETE
+
+- ✅ Multi-tenant UI branding + isolated API keys per tenant
+- ✅ RBAC: admin / trader / viewer / auditor roles
+- ✅ Advanced reporting: CSV exports for fills, PnL, audit
+- ✅ Optional DEX spot leg routing via 1inch/Paraswap (MEV protection)
+- ✅ Optional L2 transfers (Arbitrum, Optimism, Base) for gas efficiency
+- ✅ SOC2-style audit trail export
 | 1 | **Market Data Service** (exchange WS connectors) | ✅ Done — `cmd/market-data` |
 | 2 | **Paper Trading Service** (pure simulation) | ✅ Done — `cmd/paper-trader` via `PaperExecutor` |
 | 3 | **Ledger** (basic Postgres + append-only events) | ✅ Done — `cmd/ledger`, pgx/v5 |
