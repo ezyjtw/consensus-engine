@@ -1,0 +1,61 @@
+tenant_id: "default"
+
+venues:
+  binance:
+    ws_url: "wss://fstream.binance.com/stream"
+    symbols: ["BTCUSDT", "ETHUSDT"]
+    symbol_map:
+      BTCUSDT: "BTC-PERP"
+      ETHUSDT: "ETH-PERP"
+    fee_bps_taker: 4.0
+
+  okx:
+    ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+    symbol_map:
+      BTC-USDT-SWAP: "BTC-PERP"
+      ETH-USDT-SWAP: "ETH-PERP"
+    fee_bps_taker: 5.0
+
+  bybit:
+    ws_url: "wss://stream.bybit.com/v5/public/linear"
+    symbols: ["BTCUSDT", "ETHUSDT"]
+    symbol_map:
+      BTCUSDT: "BTC-PERP"
+      ETHUSDT: "ETH-PERP"
+    fee_bps_taker: 5.5
+
+  deribit:
+    ws_url: "wss://www.deribit.com/ws/api/v2"
+    symbols: ["BTC-PERPETUAL", "ETH-PERPETUAL"]
+    symbol_map:
+      BTC-PERPETUAL: "BTC-PERP"
+      ETH-PERPETUAL: "ETH-PERP"
+    fee_bps_taker: 5.0
+
+# Optional venues (uncomment to enable)
+#  htx:
+#    ws_url: "wss://api.hbdm.com/linear-swap-ws"
+#    symbols: ["BTC-USDT", "ETH-USDT"]
+#    symbol_map:
+#      BTC-USDT: "BTC-PERP"
+#      ETH-USDT: "ETH-PERP"
+#    fee_bps_taker: 4.0
+#
+#  gate:
+#    ws_url: "wss://fx-ws.gateio.ws/v4/ws/usdt"
+#    symbols: ["BTC_USDT", "ETH_USDT"]
+#    symbol_map:
+#      BTC_USDT: "BTC-PERP"
+#      ETH_USDT: "ETH-PERP"
+#    fee_bps_taker: 5.0
+
+reconnect_backoff_ms: [1000, 2000, 4000, 8000, 16000]
+orderbook_depth: 10
+funding_poll_interval_s: 30
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  use_tls: false
+  output_stream: "market:quotes"
