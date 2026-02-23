@@ -9,10 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/yourorg/arbsuite/internal/arb"
-	"github.com/yourorg/arbsuite/internal/consensus"
-	"github.com/yourorg/arbsuite/internal/execution"
-	"github.com/yourorg/arbsuite/internal/risk"
+	"github.com/ezyjtw/consensus-engine/internal/arb"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/execution"
+	"github.com/ezyjtw/consensus-engine/internal/risk"
 )
 
 // DB wraps a pgx connection pool and provides append-only write methods.

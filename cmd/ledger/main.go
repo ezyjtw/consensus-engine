@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yourorg/arbsuite/internal/consensus"
-	"github.com/yourorg/arbsuite/internal/eventbus"
-	"github.com/yourorg/arbsuite/internal/execution"
-	"github.com/yourorg/arbsuite/internal/ledger"
-	"github.com/yourorg/arbsuite/internal/risk"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/eventbus"
+	"github.com/ezyjtw/consensus-engine/internal/execution"
+	"github.com/ezyjtw/consensus-engine/internal/ledger"
+	"github.com/ezyjtw/consensus-engine/internal/risk"
 )
 
 func main() {
@@ -66,8 +66,9 @@ func main() {
 		"live:fills",
 		"risk:alerts",
 		"risk:state",
-		"trade:intents:approved",
-		"venue_status_updates", // consensus engine publishes venue state transitions here
+		"trade:intents",          // raw proposals from arb + funding engines
+		"trade:intents:approved", // post-allocator approved intents
+		"venue_status_updates",   // consensus engine publishes venue state transitions here
 	}
 	for _, s := range streams {
 		if err := sc.EnsureConsumerGroup(ctx, s, group); err != nil {

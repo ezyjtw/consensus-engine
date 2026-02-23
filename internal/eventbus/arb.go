@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/yourorg/arbsuite/internal/arb"
-	"github.com/yourorg/arbsuite/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/arb"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
 
 // ArbRedisConfig configures the arb engine's Redis connection and stream names.

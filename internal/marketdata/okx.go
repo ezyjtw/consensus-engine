@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/yourorg/arbsuite/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
 
 // OKXAdapter streams quotes from the OKX V5 public WebSocket.

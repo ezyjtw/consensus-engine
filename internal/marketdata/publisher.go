@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/yourorg/arbsuite/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
 
 // Publisher writes normalised quotes to the Redis output stream.

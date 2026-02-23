@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/yourorg/arbsuite/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
 
 // BybitAdapter streams quotes from the Bybit V5 linear public WebSocket.

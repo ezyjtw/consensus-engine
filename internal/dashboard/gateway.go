@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/yourorg/arbsuite/internal/ledger"
+	"github.com/ezyjtw/consensus-engine/internal/ledger"
 )
 
 // Gateway extends the dashboard with the full V1 REST API surface.

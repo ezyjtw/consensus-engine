@@ -1,6 +1,6 @@
 package arb
 
-import "github.com/yourorg/arbsuite/internal/consensus"
+import "github.com/ezyjtw/consensus-engine/internal/consensus"
 
 // ConsensusUpdate and VenueMetrics are consumed directly from the upstream package.
 type ConsensusUpdate = consensus.ConsensusUpdate

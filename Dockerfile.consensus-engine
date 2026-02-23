@@ -3,10 +3,10 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o consensus-engine ./cmd/consensus-engine
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /consensus-engine ./cmd/consensus-engine
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
-COPY --from=builder /app/consensus-engine .
+COPY --from=builder /consensus-engine .
 CMD ["./consensus-engine"]

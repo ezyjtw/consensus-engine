@@ -12,8 +12,8 @@ import (
 	"syscall"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/yourorg/arbsuite/internal/dashboard"
-	"github.com/yourorg/arbsuite/internal/ledger"
+	"github.com/ezyjtw/consensus-engine/internal/dashboard"
+	"github.com/ezyjtw/consensus-engine/internal/ledger"
 )
 
 func main() {

@@ -7,9 +7,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/yourorg/arbsuite/internal/consensus"
-	"github.com/yourorg/arbsuite/internal/execution"
-	"github.com/yourorg/arbsuite/internal/risk"
+	"github.com/ezyjtw/consensus-engine/internal/consensus"
+	"github.com/ezyjtw/consensus-engine/internal/execution"
+	"github.com/ezyjtw/consensus-engine/internal/risk"
 )
 
 // RiskBusConfig configures the risk daemon's stream I/O.
