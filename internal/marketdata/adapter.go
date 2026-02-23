@@ -6,8 +6,33 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
+
+// connWriter serialises WebSocket writes behind a mutex. gorilla/websocket
+// does not support concurrent writers, so any goroutine that writes (ping,
+// heartbeat response) must go through this wrapper.
+type connWriter struct {
+	mu   sync.Mutex
+	conn *websocket.Conn
+}
+
+func newConnWriter(conn *websocket.Conn) *connWriter {
+	return &connWriter{conn: conn}
+}
+
+func (cw *connWriter) WriteMessage(messageType int, data []byte) error {
+	cw.mu.Lock()
+	defer cw.mu.Unlock()
+	return cw.conn.WriteMessage(messageType, data)
+}
+
+func (cw *connWriter) WriteJSON(v interface{}) error {
+	cw.mu.Lock()
+	defer cw.mu.Unlock()
+	return cw.conn.WriteJSON(v)
+}
 
 // quoteState is a mutex-guarded partial Quote that each adapter builds up
 // incrementally as different WebSocket channels deliver their fields.

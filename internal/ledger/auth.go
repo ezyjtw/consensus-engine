@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/ezyjtw/consensus-engine/internal/auth"
@@ -112,8 +113,11 @@ func (db *DB) UpsertTenantBranding(ctx context.Context, tenantID, name, logoURL,
 
 // AuditLogRich appends an immutable audit entry with IP address and role.
 func (db *DB) AuditLogRich(ctx context.Context, tenantID, actor, role, ipAddr, action string, payload interface{}) error {
-	data, _ := json.Marshal(payload)
-	_, err := db.pool.Exec(ctx,
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal audit payload: %w", err)
+	}
+	_, err = db.pool.Exec(ctx,
 		`INSERT INTO audit_log (tenant_id, actor, role, ip_address, action, payload)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		tenantID, actor, role, ipAddr, action, string(data),

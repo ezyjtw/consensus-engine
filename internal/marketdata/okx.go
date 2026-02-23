@@ -108,6 +108,8 @@ func (a *OKXAdapter) connect(ctx context.Context) error {
 		conn.Close()
 	}()
 
+	cw := newConnWriter(conn)
+
 	// Build subscription args for all symbols.
 	var args []okxSubscribeArg
 	for _, sym := range a.venueCfg.Symbols {
@@ -120,7 +122,7 @@ func (a *OKXAdapter) connect(ctx context.Context) error {
 		)
 	}
 	subMsg := okxSubscribeMsg{Op: "subscribe", Args: args}
-	if err := conn.WriteJSON(subMsg); err != nil {
+	if err := cw.WriteJSON(subMsg); err != nil {
 		return fmt.Errorf("subscribe: %w", err)
 	}
 
@@ -153,7 +155,7 @@ func (a *OKXAdapter) connect(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-pingTicker.C:
-				if err := conn.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
+				if err := cw.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
 					return
 				}
 			}

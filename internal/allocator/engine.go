@@ -183,7 +183,7 @@ func totalNotional(intent arb.TradeIntent) float64 {
 	for _, l := range intent.Legs {
 		n += l.NotionalUSD
 	}
-	return n / float64(len(intent.Legs)) // average leg notional
+	return n
 }
 
 func qualityRank(q string) int {

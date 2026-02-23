@@ -27,7 +27,7 @@ func makeTestIntent(symbol string, expiresMs int64) arb.TradeIntent {
 		Symbol:    symbol,
 		TsMs:      time.Now().UnixMilli(),
 		ExpiresMs: expiresMs,
-		Legs: []arb.Leg{
+		Legs: []arb.TradeLeg{
 			{
 				Venue:          "binance",
 				Action:         "BUY",

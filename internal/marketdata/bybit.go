@@ -81,6 +81,8 @@ func (a *BybitAdapter) connect(ctx context.Context) error {
 		conn.Close()
 	}()
 
+	cw := newConnWriter(conn)
+
 	// Build subscription args: tickers + orderbook for each symbol.
 	var args []string
 	for _, sym := range a.venueCfg.Symbols {
@@ -90,7 +92,7 @@ func (a *BybitAdapter) connect(ctx context.Context) error {
 		)
 	}
 	subMsg := bybitSubscribeMsg{Op: "subscribe", Args: args}
-	if err := conn.WriteJSON(subMsg); err != nil {
+	if err := cw.WriteJSON(subMsg); err != nil {
 		return fmt.Errorf("subscribe: %w", err)
 	}
 
@@ -119,7 +121,7 @@ func (a *BybitAdapter) connect(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-pingTicker.C:
-				if err := conn.WriteJSON(map[string]string{"op": "ping"}); err != nil {
+				if err := cw.WriteJSON(map[string]string{"op": "ping"}); err != nil {
 					return
 				}
 			}

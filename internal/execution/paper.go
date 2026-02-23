@@ -16,6 +16,7 @@ import (
 // posEntry is the value stored in PaperExecutor.positions.
 // Defined at package scope so type assertions work correctly across methods.
 type posEntry struct {
+	mu         sync.Mutex
 	qty        float64
 	entryPrice float64
 	notional   float64
@@ -212,11 +213,13 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 func (e *PaperExecutor) updatePosition(key string, qty, price, notional float64) {
 	actual, _ := e.positions.LoadOrStore(key, &posEntry{})
 	pos := actual.(*posEntry) // safe: all stored values are *posEntry (package-level type)
+	pos.mu.Lock()
 	pos.qty += qty
 	pos.notional += notional
 	if pos.qty != 0 {
 		pos.entryPrice = price
 	}
+	pos.mu.Unlock()
 }
 
 // PositionJSON returns all current virtual positions as a serialisable map.
@@ -224,11 +227,13 @@ func (e *PaperExecutor) PositionJSON() map[string]interface{} {
 	out := make(map[string]interface{})
 	e.positions.Range(func(k, v interface{}) bool {
 		if p, ok := v.(*posEntry); ok { // same package-level type — assertion always succeeds
+			p.mu.Lock()
 			out[k.(string)] = map[string]float64{
 				"qty":         p.qty,
 				"entry_price": p.entryPrice,
 				"notional":    p.notional,
 			}
+			p.mu.Unlock()
 		}
 		return true
 	})
