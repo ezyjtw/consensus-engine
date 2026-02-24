@@ -775,6 +775,7 @@ async function boot() {
   await Promise.allSettled([fetchRole(), fetchBranding()]);
   connectSSE();
   fetchInitialPrices();
+  startClientPriceFetcher();
   loadConnections();
   loadAlerts();
   switchTab('home');
@@ -1848,6 +1849,103 @@ function renderPriceFeed() {
   tbody.innerHTML = rows.join('');
   const ts = document.getElementById('price-feed-updated');
   if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+}
+
+// ═══════════════════════════════════════════════════════
+// Client-side price fetcher — fetches directly from exchange public REST APIs
+// from the user's browser. Bypasses cloud-IP blocking that prevents the
+// server-side poller from reaching Binance/Bybit.
+// ═══════════════════════════════════════════════════════
+
+const CLIENT_PRICE_SYMBOLS = {
+  binance: { BTCUSDT:'BTC-PERP', ETHUSDT:'ETH-PERP', BNBUSDT:'BNB-PERP', SOLUSDT:'SOL-PERP', XRPUSDT:'XRP-PERP' },
+  bybit:   { BTCUSDT:'BTC-PERP', ETHUSDT:'ETH-PERP', BNBUSDT:'BNB-PERP', SOLUSDT:'SOL-PERP', XRPUSDT:'XRP-PERP' },
+  okx:     { 'BTC-USDT-SWAP':'BTC-PERP', 'ETH-USDT-SWAP':'ETH-PERP', 'SOL-USDT-SWAP':'SOL-PERP', 'XRP-USDT-SWAP':'XRP-PERP' },
+  deribit: { 'BTC-PERPETUAL':'BTC-PERP', 'ETH-PERPETUAL':'ETH-PERP' },
+};
+
+let _clientPriceTimer = null;
+
+function startClientPriceFetcher() {
+  if (_clientPriceTimer) return;
+  _fetchClientPrices();
+  _clientPriceTimer = setInterval(_fetchClientPrices, 5000);
+}
+
+async function _fetchClientPrices() {
+  await Promise.allSettled([
+    _fetchBinanceClient(),
+    _fetchBybitClient(),
+    _fetchOKXClient(),
+    _fetchDeribitClient(),
+  ]);
+  if (S.activeTab === 'home') renderPriceFeed();
+}
+
+function _updatePrice(venue, canSym, bid, ask) {
+  if (bid <= 0 || ask <= 0) return;
+  const mid = (bid + ask) / 2;
+  const key = venue + ':' + canSym;
+  const now = Date.now();
+  const existing = S.priceLatest[key];
+  if (!existing || now > existing.ts_ms) {
+    S.priceLatest[key] = { price: mid, ts_ms: now };
+  }
+}
+
+async function _fetchBinanceClient() {
+  try {
+    const r = await fetch('https://api.binance.com/api/v3/ticker/bookTicker');
+    if (!r.ok) return;
+    const data = await r.json();
+    const syms = CLIENT_PRICE_SYMBOLS.binance;
+    for (const t of data) {
+      const can = syms[t.symbol];
+      if (!can) continue;
+      _updatePrice('binance', can, parseFloat(t.bidPrice), parseFloat(t.askPrice));
+    }
+  } catch(e) { console.debug('client-prices: binance:', e.message); }
+}
+
+async function _fetchBybitClient() {
+  try {
+    const r = await fetch('https://api.bybit.com/v5/market/tickers?category=linear');
+    if (!r.ok) return;
+    const data = await r.json();
+    const syms = CLIENT_PRICE_SYMBOLS.bybit;
+    for (const t of (data.result?.list || [])) {
+      const can = syms[t.symbol];
+      if (!can) continue;
+      _updatePrice('bybit', can, parseFloat(t.bid1Price), parseFloat(t.ask1Price));
+    }
+  } catch(e) { console.debug('client-prices: bybit:', e.message); }
+}
+
+async function _fetchOKXClient() {
+  try {
+    const r = await fetch('https://www.okx.com/api/v5/market/tickers?instType=SWAP');
+    if (!r.ok) return;
+    const data = await r.json();
+    const syms = CLIENT_PRICE_SYMBOLS.okx;
+    for (const t of (data.data || [])) {
+      const can = syms[t.instId];
+      if (!can) continue;
+      _updatePrice('okx', can, parseFloat(t.bidPx), parseFloat(t.askPx));
+    }
+  } catch(e) { console.debug('client-prices: okx:', e.message); }
+}
+
+async function _fetchDeribitClient() {
+  try {
+    const syms = CLIENT_PRICE_SYMBOLS.deribit;
+    for (const [inst, can] of Object.entries(syms)) {
+      const r = await fetch('https://www.deribit.com/api/v2/public/ticker?instrument_name=' + inst);
+      if (!r.ok) continue;
+      const data = await r.json();
+      const res = data.result;
+      if (res) _updatePrice('deribit', can, res.best_bid_price, res.best_ask_price);
+    }
+  } catch(e) { console.debug('client-prices: deribit:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════
