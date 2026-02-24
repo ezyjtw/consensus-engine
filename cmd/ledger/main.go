@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ezyjtw/consensus-engine/internal/arb"
 	"github.com/ezyjtw/consensus-engine/internal/consensus"
 	"github.com/ezyjtw/consensus-engine/internal/eventbus"
 	"github.com/ezyjtw/consensus-engine/internal/execution"
@@ -147,6 +148,13 @@ func persistMsg(ctx context.Context, db *ledger.DB, stream, raw, tenantID string
 		if err := json.Unmarshal([]byte(raw), &state); err == nil {
 			if err := db.WriteRiskState(ctx, state); err != nil {
 				log.Printf("ledger: write risk state: %v", err)
+			}
+		}
+	case "trade:intents", "trade:intents:approved":
+		var intent arb.TradeIntent
+		if err := json.Unmarshal([]byte(raw), &intent); err == nil {
+			if err := db.WriteIntent(ctx, intent); err != nil {
+				log.Printf("ledger: write intent: %v", err)
 			}
 		}
 	case "consensus:status":
