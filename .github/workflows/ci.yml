@@ -76,6 +76,8 @@ jobs:
         run: |
           docker compose up -d --build --wait
           sleep 10
+      - name: Install redis-cli
+        run: sudo apt-get update -qq && sudo apt-get install -yqq redis-tools
       - name: Run smoke tests
         run: |
           chmod +x scripts/smoke-test.sh
