@@ -22,8 +22,6 @@ type DynamicAllocator struct {
 	mu          sync.Mutex
 	performance map[string]*StrategyPerformance
 	baseCaps    map[string]float64 // base caps from policy (never exceeded)
-	// Rolling window for performance assessment.
-	windowMs int64
 }
 
 // NewDynamicAllocator creates a performance-based dynamic allocator.
@@ -36,7 +34,6 @@ func NewDynamicAllocator(baseCaps map[string]float64) *DynamicAllocator {
 	return &DynamicAllocator{
 		performance: perf,
 		baseCaps:    baseCaps,
-		windowMs:    3600_000, // 1-hour performance window
 	}
 }
 
