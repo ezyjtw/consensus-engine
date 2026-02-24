@@ -11,7 +11,23 @@ import (
 	"github.com/ezyjtw/consensus-engine/internal/exchange"
 )
 
-// LiveExecutor submits real orders to exchange REST APIs.
+// legResult captures the outcome of executing a single leg.
+type legResult struct {
+	filled      bool
+	filledQty   float64
+	filledUSD   float64
+	fillPrice   float64
+	feesUSD     float64
+	orderID     string
+	venue       string
+	nativeSym   string
+	partialFill bool
+	fillTsMs    int64 // timestamp when fill was confirmed
+}
+
+// LiveExecutor submits real orders to exchange REST APIs with institutional
+// safety primitives: partial fill handling, hedge drift enforcement, emergency
+// unwind, and post-fill reconciliation.
 type LiveExecutor struct {
 	cfg        *Config
 	priceCache *PriceCache
@@ -23,8 +39,10 @@ func NewLiveExecutor(cfg *Config, cache *PriceCache, registry *exchange.Registry
 	return &LiveExecutor{cfg: cfg, priceCache: cache, registry: registry}
 }
 
-// Execute places real orders for all legs in an approved intent.
-// Returns execution events for each leg and a fill summary.
+// Execute places real orders for all legs in an approved intent, sequentially.
+// If leg A fills (or partially fills), leg B is adjusted to match. If leg B
+// fails, an emergency unwind of leg A is attempted. Hedge drift is tracked
+// between legs. After completion, fills are reconciled against exchange state.
 func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]ExecutionEvent, *SimulatedFill) {
 	now := time.Now().UnixMilli()
 
@@ -47,58 +65,22 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 		return nil, nil
 	}
 
-	var events []ExecutionEvent
+	if len(intent.Legs) == 0 {
+		return nil, nil
+	}
+
+	var allEvents []ExecutionEvent
 	var buyPrice, sellPrice float64
 	var totalFees float64
 
+	results := make([]legResult, len(intent.Legs))
+
+	// Execute legs sequentially so we can adjust leg B based on leg A's fill.
 	for i, leg := range intent.Legs {
-		ex, err := e.registry.Get(ctx, leg.Venue)
-		if err != nil {
-			log.Printf("live: no exchange client for %s: %v", leg.Venue, err)
-			events = append(events, ExecutionEvent{
-				EventType: "ORDER_REJECTED",
-				IntentID:  intent.IntentID,
-				LegIndex:  i,
-				Venue:     leg.Venue,
-				Symbol:    intent.Symbol,
-				Action:    leg.Action,
-				Strategy:  intent.Strategy,
-				TsMs:      now,
-				TenantID:  e.cfg.TenantID,
-				Mode:      e.cfg.TradingMode,
-			})
-			continue
-		}
-
-		// Map our canonical symbol to exchange-native symbol.
-		nativeSymbol := mapSymbol(leg.Venue, intent.Symbol)
-
-		// Calculate quantity from notional and mid-price.
-		qty := leg.NotionalUSD / mid
-
-		// Calculate price limit with slippage buffer.
-		var priceLimit float64
-		if leg.Action == "BUY" {
-			priceLimit = mid * (1 + leg.MaxSlippageBps/10000)
-		} else {
-			priceLimit = mid * (1 - leg.MaxSlippageBps/10000)
-		}
-
-		orderReq := exchange.OrderRequest{
-			Symbol:         nativeSymbol,
-			Side:           exchange.Side(leg.Action),
-			Type:           exchange.OrderTypeIOC,
-			Quantity:       qty,
-			Price:          priceLimit,
-			NotionalUSD:    leg.NotionalUSD,
-			MaxSlippageBps: leg.MaxSlippageBps,
-			ClientOrderID:  fmt.Sprintf("%s-leg%d", intent.IntentID, i),
-		}
-
-		orderResp, err := ex.PlaceOrder(ctx, orderReq)
-		if err != nil {
-			log.Printf("live: order failed on %s: %v", leg.Venue, err)
-			events = append(events, ExecutionEvent{
+		// Check expiry before each leg.
+		if time.Now().UnixMilli() > intent.ExpiresMs {
+			log.Printf("live: intent %s expired before leg %d", intent.IntentID, i)
+			allEvents = append(allEvents, ExecutionEvent{
 				EventType: "ORDER_REJECTED",
 				IntentID:  intent.IntentID,
 				LegIndex:  i,
@@ -110,41 +92,184 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 				TenantID:  e.cfg.TenantID,
 				Mode:      e.cfg.TradingMode,
 			})
-			continue
+			// If a previous leg filled, we have unhedged exposure — attempt unwind.
+			if i > 0 && results[i-1].filled {
+				e.emergencyUnwind(ctx, intent, i-1, results[i-1], mid, &allEvents)
+			}
+			break
 		}
 
-		// Poll for fill status (up to 5 seconds).
-		var finalOrder *exchange.OrderResponse
-		for attempt := 0; attempt < 10; attempt++ {
-			time.Sleep(500 * time.Millisecond)
-			resp, err := ex.GetOrder(ctx, nativeSymbol, orderResp.OrderID)
-			if err != nil {
-				continue
-			}
-			finalOrder = resp
-			if resp.Status == exchange.OrderStatusFilled ||
-				resp.Status == exchange.OrderStatusCancelled ||
-				resp.Status == exchange.OrderStatusRejected ||
-				resp.Status == exchange.OrderStatusExpired {
+		// Check hedge drift: if this is leg B and leg A is filled, enforce max drift.
+		if i > 0 && results[i-1].filled {
+			driftMs := time.Now().UnixMilli() - results[i-1].fillTsMs
+			if driftMs > e.cfg.HedgeDriftMaxMs {
+				log.Printf("live: hedge drift %dms exceeds max %dms — aborting leg %d",
+					driftMs, e.cfg.HedgeDriftMaxMs, i)
+				allEvents = append(allEvents, ExecutionEvent{
+					EventType: "HEDGE_DRIFT",
+					IntentID:  intent.IntentID,
+					LegIndex:  i,
+					Venue:     leg.Venue,
+					Symbol:    intent.Symbol,
+					Action:    leg.Action,
+					Strategy:  intent.Strategy,
+					TsMs:      time.Now().UnixMilli(),
+					TenantID:  e.cfg.TenantID,
+					Mode:      e.cfg.TradingMode,
+				})
+				e.emergencyUnwind(ctx, intent, i-1, results[i-1], mid, &allEvents)
 				break
 			}
 		}
 
-		if finalOrder == nil {
-			finalOrder = orderResp
+		ex, err := e.registry.Get(ctx, leg.Venue)
+		if err != nil {
+			log.Printf("live: no exchange client for %s: %v", leg.Venue, err)
+			allEvents = append(allEvents, ExecutionEvent{
+				EventType: "ORDER_REJECTED",
+				IntentID:  intent.IntentID,
+				LegIndex:  i,
+				Venue:     leg.Venue,
+				Symbol:    intent.Symbol,
+				Action:    leg.Action,
+				Strategy:  intent.Strategy,
+				TsMs:      time.Now().UnixMilli(),
+				TenantID:  e.cfg.TenantID,
+				Mode:      e.cfg.TradingMode,
+			})
+			if i > 0 && results[i-1].filled {
+				e.emergencyUnwind(ctx, intent, i-1, results[i-1], mid, &allEvents)
+			}
+			break
 		}
 
-		fillTs := time.Now().UnixMilli()
-		latency := fillTs - now
+		nativeSymbol := mapSymbol(leg.Venue, intent.Symbol)
 
-		filledNotional := finalOrder.FilledQty * finalOrder.AvgFillPrice
-		if filledNotional == 0 {
-			filledNotional = leg.NotionalUSD // fallback
+		// Adjust notional if previous leg was a partial fill.
+		targetNotional := leg.NotionalUSD
+		if i > 0 && results[i-1].partialFill {
+			targetNotional = results[i-1].filledUSD
+			log.Printf("live: adjusting leg %d notional to $%.2f (matching partial fill on leg %d)",
+				i, targetNotional, i-1)
 		}
 
+		qty := targetNotional / mid
+
+		var priceLimit float64
+		if leg.Action == "BUY" {
+			priceLimit = mid * (1 + leg.MaxSlippageBps/10000)
+		} else {
+			priceLimit = mid * (1 - leg.MaxSlippageBps/10000)
+		}
+
+		// Submit order with retries.
+		var finalOrder *exchange.OrderResponse
+		var orderErr error
+		for attempt := 0; attempt <= e.cfg.MaxRetriesPerLeg; attempt++ {
+			if attempt > 0 {
+				log.Printf("live: retrying leg %d attempt %d/%d", i, attempt, e.cfg.MaxRetriesPerLeg)
+				time.Sleep(time.Duration(attempt*500) * time.Millisecond)
+
+				// Re-check expiry before retry.
+				if time.Now().UnixMilli() > intent.ExpiresMs {
+					orderErr = fmt.Errorf("intent expired during retry")
+					break
+				}
+			}
+
+			orderReq := exchange.OrderRequest{
+				Symbol:         nativeSymbol,
+				Side:           exchange.Side(leg.Action),
+				Type:           exchange.OrderTypeIOC,
+				Quantity:       qty,
+				Price:          priceLimit,
+				NotionalUSD:    targetNotional,
+				MaxSlippageBps: leg.MaxSlippageBps,
+				ClientOrderID:  fmt.Sprintf("%s-leg%d-r%d", intent.IntentID, i, attempt),
+			}
+
+			orderResp, err := ex.PlaceOrder(ctx, orderReq)
+			if err != nil {
+				orderErr = err
+				log.Printf("live: order failed on %s (attempt %d): %v", leg.Venue, attempt, err)
+				continue
+			}
+
+			// Poll for terminal status.
+			final := e.pollOrderStatus(ctx, ex, nativeSymbol, orderResp.OrderID)
+			if final == nil {
+				final = orderResp
+			}
+
+			if final.Status == exchange.OrderStatusFilled ||
+				(final.Status == exchange.OrderStatusPartiallyFilled && final.FilledQty > 0) {
+				finalOrder = final
+				orderErr = nil
+				break
+			}
+
+			// Partial fill below minimum threshold — cancel remainder.
+			if final.FilledQty > 0 {
+				fillPct := final.FilledQty / qty
+				if fillPct < e.cfg.MinPartialFillPct {
+					log.Printf("live: partial fill %.1f%% below min %.1f%% — cancelling and retrying",
+						fillPct*100, e.cfg.MinPartialFillPct*100)
+					_ = ex.CancelOrder(ctx, nativeSymbol, final.OrderID)
+					orderErr = fmt.Errorf("partial fill below threshold")
+					continue
+				}
+				finalOrder = final
+				orderErr = nil
+				break
+			}
+
+			orderErr = fmt.Errorf("order status: %s", final.Status)
+		}
+
+		if orderErr != nil || finalOrder == nil {
+			log.Printf("live: leg %d failed after retries: %v", i, orderErr)
+			allEvents = append(allEvents, ExecutionEvent{
+				EventType: "ORDER_REJECTED",
+				IntentID:  intent.IntentID,
+				LegIndex:  i,
+				Venue:     leg.Venue,
+				Symbol:    intent.Symbol,
+				Action:    leg.Action,
+				Strategy:  intent.Strategy,
+				TsMs:      time.Now().UnixMilli(),
+				TenantID:  e.cfg.TenantID,
+				Mode:      e.cfg.TradingMode,
+			})
+			if i > 0 && results[i-1].filled {
+				e.emergencyUnwind(ctx, intent, i-1, results[i-1], mid, &allEvents)
+			}
+			break
+		}
+
+		// Record result.
 		fillPrice := finalOrder.AvgFillPrice
 		if fillPrice == 0 {
 			fillPrice = mid
+		}
+		filledNotional := finalOrder.FilledQty * fillPrice
+		if filledNotional == 0 {
+			filledNotional = targetNotional
+		}
+
+		isPartial := finalOrder.Status == exchange.OrderStatusPartiallyFilled ||
+			(finalOrder.FilledQty > 0 && finalOrder.FilledQty < qty*0.99)
+
+		results[i] = legResult{
+			filled:      true,
+			filledQty:   finalOrder.FilledQty,
+			filledUSD:   filledNotional,
+			fillPrice:   fillPrice,
+			feesUSD:     finalOrder.FeesUSD,
+			orderID:     finalOrder.OrderID,
+			venue:       leg.Venue,
+			nativeSym:   nativeSymbol,
+			partialFill: isPartial,
+			fillTsMs:    time.Now().UnixMilli(),
 		}
 
 		if leg.Action == "BUY" {
@@ -162,17 +287,12 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 		}
 
 		eventType := "ORDER_FILLED"
-		if finalOrder.Status == exchange.OrderStatusRejected {
-			eventType = "ORDER_REJECTED"
-		} else if finalOrder.Status == exchange.OrderStatusCancelled || finalOrder.Status == exchange.OrderStatusExpired {
-			if finalOrder.FilledQty > 0 {
-				eventType = "LEG_PARTIAL"
-			} else {
-				eventType = "ORDER_REJECTED"
-			}
+		if isPartial {
+			eventType = "LEG_PARTIAL"
 		}
 
-		events = append(events, ExecutionEvent{
+		fillTs := time.Now().UnixMilli()
+		allEvents = append(allEvents, ExecutionEvent{
 			EventType:             eventType,
 			IntentID:              intent.IntentID,
 			LegIndex:              i,
@@ -181,33 +301,51 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 			Action:                leg.Action,
 			Strategy:              intent.Strategy,
 			Market:                market,
-			RequestedNotionalUSD:  leg.NotionalUSD,
+			RequestedNotionalUSD:  targetNotional,
 			FilledNotionalUSD:     filledNotional,
 			FilledPrice:           fillPrice,
 			SlippageBpsActual:     slipBps,
 			SlippageBpsAllowed:    leg.MaxSlippageBps,
 			FeesUSDActual:         finalOrder.FeesUSD,
 			TsMs:                  fillTs,
-			LatencySignalToFillMs: latency,
+			LatencySignalToFillMs: fillTs - now,
 			TenantID:              e.cfg.TenantID,
 			Mode:                  e.cfg.TradingMode,
 		})
 	}
 
+	// Schedule async reconciliation if we had fills.
+	anyFilled := false
+	for _, r := range results {
+		if r.filled {
+			anyFilled = true
+			break
+		}
+	}
+	if anyFilled {
+		go e.reconcileFills(ctx, intent, results)
+	}
+
+	// Build fill summary.
 	netPnL := 0.0
 	if buyPrice > 0 && sellPrice > 0 {
-		notional := intent.Legs[0].NotionalUSD
+		notional := results[0].filledUSD
+		if notional == 0 {
+			notional = intent.Legs[0].NotionalUSD
+		}
 		netPnL = (sellPrice-buyPrice)/mid*notional - totalFees
 	}
 
-	fillLegs := make([]FillLeg, 0, len(events))
-	for _, ev := range events {
-		fillLegs = append(fillLegs, FillLeg{
-			Venue:             ev.Venue,
-			Action:            ev.Action,
-			FilledNotionalUSD: ev.FilledNotionalUSD,
-			FilledPrice:       ev.FilledPrice,
-		})
+	fillLegs := make([]FillLeg, 0, len(allEvents))
+	for _, ev := range allEvents {
+		if ev.EventType == "ORDER_FILLED" || ev.EventType == "LEG_PARTIAL" {
+			fillLegs = append(fillLegs, FillLeg{
+				Venue:             ev.Venue,
+				Action:            ev.Action,
+				FilledNotionalUSD: ev.FilledNotionalUSD,
+				FilledPrice:       ev.FilledPrice,
+			})
+		}
 	}
 
 	fill := &SimulatedFill{
@@ -230,7 +368,190 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 		TenantID:          e.cfg.TenantID,
 	}
 
-	return events, fill
+	return allEvents, fill
+}
+
+// pollOrderStatus polls the exchange for terminal order status.
+func (e *LiveExecutor) pollOrderStatus(ctx context.Context, ex exchange.Exchange, symbol, orderID string) *exchange.OrderResponse {
+	for attempt := 0; attempt < 10; attempt++ {
+		time.Sleep(500 * time.Millisecond)
+		resp, err := ex.GetOrder(ctx, symbol, orderID)
+		if err != nil {
+			continue
+		}
+		switch resp.Status {
+		case exchange.OrderStatusFilled,
+			exchange.OrderStatusCancelled,
+			exchange.OrderStatusRejected,
+			exchange.OrderStatusExpired,
+			exchange.OrderStatusPartiallyFilled:
+			return resp
+		}
+	}
+	return nil
+}
+
+// emergencyUnwind attempts to close the position from a filled leg that has
+// no matching hedge. It places a market order in the opposite direction.
+func (e *LiveExecutor) emergencyUnwind(
+	ctx context.Context,
+	intent arb.TradeIntent,
+	legIdx int,
+	result legResult,
+	mid float64,
+	events *[]ExecutionEvent,
+) {
+	log.Printf("live: EMERGENCY UNWIND — reversing leg %d on %s (qty=%.6f)",
+		legIdx, result.venue, result.filledQty)
+
+	ex, err := e.registry.Get(ctx, result.venue)
+	if err != nil {
+		log.Printf("live: emergency unwind failed — no exchange client for %s: %v", result.venue, err)
+		*events = append(*events, ExecutionEvent{
+			EventType: "HEDGE_FAILED",
+			IntentID:  intent.IntentID,
+			LegIndex:  legIdx,
+			Venue:     result.venue,
+			Symbol:    intent.Symbol,
+			Strategy:  intent.Strategy,
+			TsMs:      time.Now().UnixMilli(),
+			TenantID:  e.cfg.TenantID,
+			Mode:      e.cfg.TradingMode,
+		})
+		return
+	}
+
+	// Reverse the action.
+	originalAction := intent.Legs[legIdx].Action
+	reverseAction := "SELL"
+	if originalAction == "SELL" {
+		reverseAction = "BUY"
+	}
+
+	unwindReq := exchange.OrderRequest{
+		Symbol:        result.nativeSym,
+		Side:          exchange.Side(reverseAction),
+		Type:          exchange.OrderTypeMarket,
+		Quantity:      result.filledQty,
+		NotionalUSD:   result.filledUSD,
+		ReduceOnly:    true,
+		ClientOrderID: fmt.Sprintf("%s-unwind-leg%d", intent.IntentID, legIdx),
+	}
+
+	resp, err := ex.PlaceOrder(ctx, unwindReq)
+	if err != nil {
+		log.Printf("live: EMERGENCY UNWIND FAILED on %s: %v", result.venue, err)
+		*events = append(*events, ExecutionEvent{
+			EventType: "HEDGE_FAILED",
+			IntentID:  intent.IntentID,
+			LegIndex:  legIdx,
+			Venue:     result.venue,
+			Symbol:    intent.Symbol,
+			Action:    reverseAction,
+			Strategy:  intent.Strategy,
+			TsMs:      time.Now().UnixMilli(),
+			TenantID:  e.cfg.TenantID,
+			Mode:      e.cfg.TradingMode,
+		})
+		return
+	}
+
+	// Wait for unwind fill.
+	final := e.pollOrderStatus(ctx, ex, result.nativeSym, resp.OrderID)
+	if final == nil {
+		final = resp
+	}
+
+	unwindPrice := final.AvgFillPrice
+	if unwindPrice == 0 {
+		unwindPrice = mid
+	}
+
+	eventType := "ORDER_FILLED"
+	if final.Status != exchange.OrderStatusFilled {
+		eventType = "HEDGE_FAILED"
+		log.Printf("live: emergency unwind did not fully fill (status=%s)", final.Status)
+	} else {
+		log.Printf("live: emergency unwind filled at %.2f on %s", unwindPrice, result.venue)
+	}
+
+	*events = append(*events, ExecutionEvent{
+		EventType:            eventType,
+		IntentID:             intent.IntentID,
+		LegIndex:             legIdx,
+		Venue:                result.venue,
+		Symbol:               intent.Symbol,
+		Action:               reverseAction,
+		Strategy:             intent.Strategy,
+		Market:               "PERP",
+		RequestedNotionalUSD: result.filledUSD,
+		FilledNotionalUSD:    final.FilledQty * unwindPrice,
+		FilledPrice:          unwindPrice,
+		FeesUSDActual:        final.FeesUSD,
+		TsMs:                 time.Now().UnixMilli(),
+		TenantID:             e.cfg.TenantID,
+		Mode:                 e.cfg.TradingMode,
+	})
+}
+
+// reconcileFills verifies that our internal fill records match the exchange's
+// view of the orders. Logs discrepancies for investigation.
+func (e *LiveExecutor) reconcileFills(
+	ctx context.Context,
+	intent arb.TradeIntent,
+	results []legResult,
+) {
+	time.Sleep(time.Duration(e.cfg.ReconDelayMs) * time.Millisecond)
+
+	for i, r := range results {
+		if !r.filled || r.orderID == "" {
+			continue
+		}
+
+		ex, err := e.registry.Get(ctx, r.venue)
+		if err != nil {
+			log.Printf("live-recon: cannot get exchange %s for recon: %v", r.venue, err)
+			continue
+		}
+
+		order, err := ex.GetOrder(ctx, r.nativeSym, r.orderID)
+		if err != nil {
+			log.Printf("live-recon: cannot fetch order %s on %s: %v", r.orderID, r.venue, err)
+			continue
+		}
+
+		// Check quantity divergence.
+		if order.FilledQty > 0 {
+			qtyDiff := math.Abs(r.filledQty-order.FilledQty) / order.FilledQty
+			if qtyDiff > 0.01 { // >1% divergence
+				log.Printf("live-recon: QUANTITY DIVERGENCE intent=%s leg=%d venue=%s "+
+					"internal=%.6f exchange=%.6f diff=%.2f%%",
+					intent.IntentID, i, r.venue,
+					r.filledQty, order.FilledQty, qtyDiff*100)
+			}
+		}
+
+		// Check price divergence.
+		if order.AvgFillPrice > 0 {
+			priceDiff := math.Abs(r.fillPrice-order.AvgFillPrice) / order.AvgFillPrice
+			if priceDiff > 0.001 { // >0.1% = 10bps divergence
+				log.Printf("live-recon: PRICE DIVERGENCE intent=%s leg=%d venue=%s "+
+					"internal=%.2f exchange=%.2f diff=%.1fbps",
+					intent.IntentID, i, r.venue,
+					r.fillPrice, order.AvgFillPrice, priceDiff*10000)
+			}
+		}
+
+		// Check fee divergence.
+		if order.FeesUSD > 0 {
+			feeDiff := math.Abs(r.feesUSD - order.FeesUSD)
+			if feeDiff > 1.0 { // >$1 fee difference
+				log.Printf("live-recon: FEE DIVERGENCE intent=%s leg=%d venue=%s "+
+					"internal=$%.2f exchange=$%.2f",
+					intent.IntentID, i, r.venue, r.feesUSD, order.FeesUSD)
+			}
+		}
+	}
 }
 
 // mapSymbol converts canonical symbols (e.g. "BTC-PERP") to exchange-native format.

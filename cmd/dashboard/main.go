@@ -24,8 +24,14 @@ func main() {
 	}
 
 	authToken := os.Getenv("DASHBOARD_AUTH_TOKEN")
+	env := os.Getenv("ENV")
 	if authToken == "" {
-		log.Println("WARNING: DASHBOARD_AUTH_TOKEN not set — dashboard is unprotected")
+		switch env {
+		case "", "dev", "development":
+			log.Println("WARNING: DASHBOARD_AUTH_TOKEN not set — running in dev mode (unprotected)")
+		default:
+			log.Fatalf("DASHBOARD_AUTH_TOKEN is required when ENV=%s (set ENV=dev for development mode)", env)
+		}
 	}
 
 	port := os.Getenv("PORT")
