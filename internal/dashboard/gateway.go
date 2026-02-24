@@ -77,6 +77,9 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	s.mux.HandleFunc("PUT /api/paper/mode", s.authRole(auth.RoleTrader, gw.handleSetPaperMode))
 	s.mux.HandleFunc("GET /api/paper/equity", s.auth(gw.handlePaperEquity))
 
+	// Manual trade submission (publishes intent to trade:intents stream)
+	s.mux.HandleFunc("POST /api/trade/manual", s.authRole(auth.RoleTrader, gw.handleManualTrade))
+
 	// ── V3: Identity ──────────────────────────────────────────────────────
 	s.mux.HandleFunc("GET /api/auth/me", s.auth(gw.handleAuthMe))
 
@@ -564,6 +567,131 @@ func (gw *Gateway) handlePaperEquity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, snap)
+}
+
+// handleManualTrade allows a user to manually submit a trade intent that flows
+// through the standard pipeline: trade:intents → capital-allocator → execution-router.
+func (gw *Gateway) handleManualTrade(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Symbol      string  `json:"symbol"`
+		NotionalUSD float64 `json:"notional_usd"`
+		BuyVenue    string  `json:"buy_venue"`
+		SellVenue   string  `json:"sell_venue"`
+		TTLMs       int64   `json:"ttl_ms"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonErr(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Symbol == "" {
+		jsonErr(w, "symbol is required (e.g. BTC-PERP)", http.StatusBadRequest)
+		return
+	}
+	if req.NotionalUSD <= 0 || req.NotionalUSD > 100000 {
+		jsonErr(w, "notional_usd must be between 0 and 100,000", http.StatusBadRequest)
+		return
+	}
+	if req.BuyVenue == "" || req.SellVenue == "" {
+		jsonErr(w, "buy_venue and sell_venue are required", http.StatusBadRequest)
+		return
+	}
+	if req.BuyVenue == req.SellVenue {
+		jsonErr(w, "buy_venue and sell_venue must be different", http.StatusBadRequest)
+		return
+	}
+	if req.TTLMs <= 0 {
+		req.TTLMs = 30000 // 30 second default
+	}
+
+	now := time.Now()
+	intentID := fmt.Sprintf("manual-%s-%d", req.Symbol, now.UnixMilli())
+
+	intent := map[string]interface{}{
+		"schema_version": 4,
+		"tenant_id":      gw.tenantID,
+		"intent_id":      intentID,
+		"strategy":       "MANUAL",
+		"symbol":         req.Symbol,
+		"ts_ms":          now.UnixMilli(),
+		"expires_ms":     now.Add(time.Duration(req.TTLMs) * time.Millisecond).UnixMilli(),
+		"legs": []map[string]interface{}{
+			{
+				"venue":            req.BuyVenue,
+				"action":           "BUY",
+				"type":             "MARKET_OR_IOC",
+				"market":           "PERP",
+				"notional_usd":     req.NotionalUSD,
+				"max_slippage_bps": 10.0,
+				"price_limit":      0,
+			},
+			{
+				"venue":            req.SellVenue,
+				"action":           "SELL",
+				"type":             "MARKET_OR_IOC",
+				"market":           "PERP",
+				"notional_usd":     req.NotionalUSD,
+				"max_slippage_bps": 10.0,
+				"price_limit":      0,
+			},
+		},
+		"expected": map[string]interface{}{
+			"edge_bps_gross":   0,
+			"edge_bps_net":     0,
+			"profit_usd_net":   0,
+			"fees_usd_est":     req.NotionalUSD * 2 * 0.0005, // ~5bps per leg
+			"slippage_usd_est": 0,
+		},
+		"constraints": map[string]interface{}{
+			"min_quality":      "LOW",
+			"require_venue_ok": false,
+			"max_age_ms":       req.TTLMs,
+			"hedge_preference": "NONE",
+			"cooldown_key":     "",
+		},
+		"debug": map[string]interface{}{
+			"buy_on":  req.BuyVenue,
+			"sell_on": req.SellVenue,
+		},
+	}
+
+	data, err := json.Marshal(intent)
+	if err != nil {
+		jsonErr(w, "marshal error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+	_, err = gw.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: "trade:intents",
+		Values: map[string]interface{}{"data": string(data)},
+	}).Result()
+	if err != nil {
+		jsonErr(w, "failed to publish intent: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Audit log.
+	if gw.db != nil {
+		if key := auth.FromContext(ctx); key != nil {
+			_ = gw.db.AuditLogRich(ctx, gw.tenantID, key.Name, string(key.Role),
+				auth.ClientIP(r), "manual_trade", map[string]interface{}{
+					"intent_id": intentID, "symbol": req.Symbol,
+					"notional_usd": req.NotionalUSD, "buy_venue": req.BuyVenue, "sell_venue": req.SellVenue,
+				})
+		}
+	}
+
+	jsonOK(w, map[string]interface{}{
+		"status":      "submitted",
+		"intent_id":   intentID,
+		"symbol":      req.Symbol,
+		"notional":    req.NotionalUSD,
+		"buy_venue":   req.BuyVenue,
+		"sell_venue":  req.SellVenue,
+		"expires_ms":  intent["expires_ms"],
+		"stream":      "trade:intents",
+		"note":        "Intent submitted to pipeline. Capital allocator will approve or reject based on available equity.",
+	})
 }
 
 func (gw *Gateway) handleSetPaperMode(w http.ResponseWriter, r *http.Request) {
