@@ -110,6 +110,16 @@ func main() {
 		}
 	}
 
+	// Start the open interest poller as a background goroutine.
+	// OI data is published to the market:open_interest stream every 60s.
+	oiPoller := marketdata.NewOIPoller(pub.Redis(), cfg.TenantID, 0)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		oiPoller.Run(ctx)
+		log.Println("oi-poller stopped")
+	}()
+
 	log.Println("market-data: all adapters running")
 	wg.Wait()
 	log.Println("market-data: shutdown complete")

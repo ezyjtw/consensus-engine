@@ -55,6 +55,12 @@ func (p *Publisher) Publish(ctx context.Context, q consensus.Quote) error {
 	}).Err()
 }
 
+// Redis returns the underlying Redis client, for use by auxiliary pollers
+// that need to publish to additional streams.
+func (p *Publisher) Redis() *redis.Client {
+	return p.rdb
+}
+
 // Close shuts down the Redis connection.
 func (p *Publisher) Close() error {
 	return p.rdb.Close()

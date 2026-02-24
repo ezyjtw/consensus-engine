@@ -34,6 +34,8 @@ type Engine struct {
 	Emitted    map[string]int
 	Rejected   map[string]int
 	forecaster *RegimeForecaster
+	scheduler  *FundingScheduler
+	volTracker *VolTracker
 }
 
 func NewEngine(p *Policy) *Engine {
@@ -48,6 +50,8 @@ func NewEngine(p *Policy) *Engine {
 		Emitted:    make(map[string]int),
 		Rejected:   make(map[string]int),
 		forecaster: NewRegimeForecaster(0.15),
+		scheduler:  NewFundingScheduler(),
+		volTracker: NewVolTracker(500),
 	}
 }
 
@@ -74,6 +78,8 @@ func (e *Engine) UpdateQuote(q consensus.Quote) {
 	}
 	if q.Mark > 0 {
 		d.markPrice = q.Mark
+		// Feed the vol tracker with mark price observations.
+		e.volTracker.Record(ven, sym, q.Mark, q.TsMs)
 	}
 	if q.FeeBpsTaker > 0 {
 		d.feeBpsTaker = q.FeeBpsTaker
@@ -92,8 +98,14 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	now := time.Now().UnixMilli()
+	now := time.Now()
+	nowMs := now.UnixMilli()
 	var intents []arb.TradeIntent
+
+	// Scheduling: skip new entries in the last 30 minutes before a funding reset.
+	// Positions opened near reset only collect a partial period and face rate-flip risk.
+	nearReset := e.scheduler.IsNearReset(now, 30*time.Minute)
+	optimalEntry := e.scheduler.OptimalEntry(now)
 
 	for _, sym := range e.policy.Symbols {
 		venueMap := e.state[sym]
@@ -112,6 +124,12 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 				continue
 			}
 
+			// Skip new entries near funding reset — partial period risk.
+			if nearReset {
+				e.Rejected["carry_near_reset"]++
+				continue
+			}
+
 			// Annualised gross yield (%) from 8h funding: rate × 3 × 365 × 100
 			annualGrossPct := d.fundingRate * 3 * 365 * 100
 			// Cost: 2 entry legs × taker fee (spot buy + perp short).
@@ -126,18 +144,26 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 			}
 
 			key := fmt.Sprintf("carry:%s:%s", sym, ven)
-			if e.onCooldown(key, now) {
+			if e.onCooldown(key, nowMs) {
 				e.Rejected["carry_cooldown"]++
 				continue
 			}
 
+			// Volatility gating: reduce position size when realized vol is elevated.
 			notional := e.policy.MaxNotionalUSD
-			intent := e.buildCarryIntent(tenantID, sym, ven, d, notional, annualNetPct, now)
+			notional = e.applyVolGate(ven, sym, notional)
+
+			// Bonus: increase notional slightly in optimal entry window (just after reset).
+			if optimalEntry && notional == e.policy.MaxNotionalUSD {
+				log.Printf("funding: CARRY optimal entry window for %s on %s", sym, ven)
+			}
+
+			intent := e.buildCarryIntent(tenantID, sym, ven, d, notional, annualNetPct, nowMs)
 			intents = append(intents, intent)
-			e.cooldown[key] = now
+			e.cooldown[key] = nowMs
 			e.Emitted[StrategyFundingCarry]++
-			log.Printf("funding: CARRY intent sym=%s venue=%s net_annual=%.2f%%",
-				sym, ven, annualNetPct)
+			log.Printf("funding: CARRY intent sym=%s venue=%s net_annual=%.2f%% notional=%.0f",
+				sym, ven, annualNetPct, notional)
 		}
 
 		// ── FUNDING_DIFFERENTIAL (cross-venue: long low-rate, short high-rate) ─
@@ -186,21 +212,31 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 					continue
 				}
 
+				// Skip new differential entries near funding reset.
+				if nearReset {
+					e.Rejected["diff_near_reset"]++
+					continue
+				}
+
 				key := fmt.Sprintf("diff:%s:%s:%s", sym, vA, vB)
-				if e.onCooldown(key, now) {
+				if e.onCooldown(key, nowMs) {
 					e.Rejected["diff_cooldown"]++
 					continue
 				}
 
+				// Volatility gating: use the higher vol of the two venues.
 				notional := e.policy.MaxNotionalUSD
+				notional = e.applyVolGate(vA, sym, notional)
+				notional = e.applyVolGate(vB, sym, notional)
+
 				midPrice := (dA.markPrice + dB.markPrice) / 2
 				intent := e.buildDiffIntent(tenantID, sym, vA, vB, dA, dB,
-					notional, annualNetPct, diffBps, midPrice, now)
+					notional, annualNetPct, diffBps, midPrice, nowMs)
 				intents = append(intents, intent)
-				e.cooldown[key] = now
+				e.cooldown[key] = nowMs
 				e.Emitted[StrategyFundingDifferential]++
-				log.Printf("funding: DIFF intent sym=%s long=%s short=%s diff=%.2fbps net_annual=%.2f%%",
-					sym, vA, vB, diffBps, annualNetPct)
+				log.Printf("funding: DIFF intent sym=%s long=%s short=%s diff=%.2fbps net_annual=%.2f%% notional=%.0f",
+					sym, vA, vB, diffBps, annualNetPct, notional)
 			}
 		}
 	}
@@ -219,6 +255,25 @@ func (e *Engine) minYield(annualNetPct float64) float64 {
 		return t
 	}
 	return 8.0
+}
+
+// applyVolGate reduces notional when realized vol exceeds the configured threshold.
+func (e *Engine) applyVolGate(venue, symbol string, notional float64) float64 {
+	if e.volTracker == nil || e.policy.VolatilityGate.VolThresholdPct <= 0 {
+		return notional
+	}
+	vol := e.volTracker.RealizedVol(venue, symbol)
+	if vol <= e.policy.VolatilityGate.VolThresholdPct {
+		return notional
+	}
+	factor := e.policy.VolatilityGate.SizeReductionFactor
+	if factor <= 0 || factor >= 1 {
+		factor = 0.5
+	}
+	reduced := notional * factor
+	log.Printf("funding: vol gate sym=%s venue=%s vol=%.1f%% > %.1f%% — reducing notional %.0f → %.0f",
+		symbol, venue, vol, e.policy.VolatilityGate.VolThresholdPct, notional, reduced)
+	return reduced
 }
 
 func (e *Engine) onCooldown(key string, nowMs int64) bool {
