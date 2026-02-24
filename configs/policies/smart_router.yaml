@@ -1,0 +1,21 @@
+---
+# Smart order routing and passive liquidity provision
+router:
+  fill_prob_weight: 0.30
+  slippage_weight: 0.25
+  latency_weight: 0.20
+  reliability_weight: 0.15
+  depth_weight: 0.10
+  depth_ref_usd: 500000
+  max_slippage_bps: 15.0
+  passive_spread_min_bps: 3.0
+  history_window_ms: 300000     # 5 minute history for venue stats
+
+passive:
+  min_spread_bps: 3.0           # minimum spread to provide liquidity
+  min_edge_bps: 1.0             # minimum edge after maker fee
+  max_order_size_usd: 10000
+  max_outstanding_usd: 50000
+  fee_bps_maker: -0.5           # negative = rebate
+  stale_ms: 5000                # cancel open orders after 5s
+  max_adverse_move_bps: 5.0     # cancel if price moves against

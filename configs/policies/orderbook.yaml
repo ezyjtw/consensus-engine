@@ -1,0 +1,38 @@
+---
+# Order book aggregation and market intelligence configuration
+aggregator:
+  stale_book_ms: 5000           # discard books older than 5s
+  slippage_sizes_usd:           # standard sizes for slippage curves
+    - 1000
+    - 5000
+    - 10000
+    - 25000
+    - 50000
+    - 100000
+    - 250000
+    - 500000
+
+flow_detector:
+  window_ms: 10000              # 10 second lookback for flow analysis
+  max_samples: 5000
+
+leader_detector:
+  min_change_bps: 2.0           # minimum price move to track
+  correl_window_ms: 500         # max time for follower response
+  analysis_window_ms: 300000    # 5 minute analysis window
+
+fair_value:
+  stale_ms: 2000
+  min_venues: 2
+  depth_ref_usd: 500000
+  latency_ref_us: 100000
+  leadership_alpha: 0.35
+  depth_alpha: 0.25
+  latency_alpha: 0.20
+  reliability_alpha: 0.20
+  ewa_decay: 0.95
+  base_weights:
+    binance: 1.0
+    okx: 0.9
+    bybit: 0.85
+    deribit: 0.80

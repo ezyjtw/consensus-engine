@@ -102,6 +102,17 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	// ── V3: Strategy state ───────────────────────────────────────────────
 	s.mux.HandleFunc("GET /api/strategies", s.auth(gw.handleGetStrategies))
 
+	// ── V4: Performance & Intelligence ────────────────────────────────
+	s.mux.HandleFunc("GET /api/pipeline/latency", s.auth(gw.handlePipelineLatency))
+	s.mux.HandleFunc("GET /api/regime", s.auth(gw.handleRegimeState))
+	s.mux.HandleFunc("GET /api/opportunities", s.auth(gw.handleOpportunities))
+	s.mux.HandleFunc("GET /api/opportunities/missed", s.auth(gw.handleMissedOpportunities))
+	s.mux.HandleFunc("GET /api/inventory", s.auth(gw.handleInventory))
+	s.mux.HandleFunc("GET /api/slippage-curves", s.auth(gw.handleSlippageCurves))
+	s.mux.HandleFunc("GET /api/leader-stats", s.auth(gw.handleLeaderStats))
+	s.mux.HandleFunc("GET /api/optimizer/params", s.authRole(auth.RoleTrader, gw.handleOptimizerParams))
+	s.mux.HandleFunc("GET /api/venue-scores", s.auth(gw.handleVenueScores))
+
 	// Health (public)
 	s.mux.HandleFunc("GET /api/health", gw.handleHealth)
 }
@@ -1334,6 +1345,137 @@ func (gw *Gateway) handleDenyTransfer(w http.ResponseWriter, r *http.Request) {
 		"request_id": req.RequestID,
 		"by":         actor,
 	})
+}
+
+// ── V4: Performance & Intelligence ────────────────────────────────────────
+
+func (gw *Gateway) handlePipelineLatency(w http.ResponseWriter, r *http.Request) {
+	// Return pipeline latency metrics from Redis
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "pipeline:latency:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"stages":          []interface{}{},
+			"total_p50_us":    0,
+			"total_p99_us":    0,
+			"tick_to_trade_us": 0,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleRegimeState(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "regime:state:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"regime":     "CALM",
+			"confidence": 0,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleOpportunities(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	// Fetch recent detected, executed, and predicted opportunities
+	detected, _ := gw.rdb.LRange(ctx, "opportunities:detected:"+gw.tenantID, 0, 49).Result()
+	executed, _ := gw.rdb.LRange(ctx, "opportunities:executed:"+gw.tenantID, 0, 49).Result()
+	predicted, _ := gw.rdb.LRange(ctx, "opportunities:predicted:"+gw.tenantID, 0, 49).Result()
+
+	jsonOK(w, map[string]interface{}{
+		"detected":  parseJSONList(detected),
+		"executed":  parseJSONList(executed),
+		"predicted": parseJSONList(predicted),
+	})
+}
+
+func (gw *Gateway) handleMissedOpportunities(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	missed, _ := gw.rdb.LRange(ctx, "opportunities:missed:"+gw.tenantID, 0, 99).Result()
+	jsonOK(w, map[string]interface{}{
+		"missed": parseJSONList(missed),
+		"count":  len(missed),
+	})
+}
+
+func (gw *Gateway) handleInventory(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "inventory:snapshot:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"balances":        []interface{}{},
+			"total_equity_usd": 0,
+			"actions":         []interface{}{},
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleSlippageCurves(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	symbol := r.URL.Query().Get("symbol")
+	if symbol == "" {
+		symbol = "BTC-PERP"
+	}
+	data, _ := gw.rdb.Get(ctx, "slippage:curves:"+gw.tenantID+":"+symbol).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{"curves": []interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleLeaderStats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	symbol := r.URL.Query().Get("symbol")
+	if symbol == "" {
+		symbol = "BTC-PERP"
+	}
+	data, _ := gw.rdb.Get(ctx, "leader:stats:"+gw.tenantID+":"+symbol).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{"stats": []interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleOptimizerParams(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "optimizer:params:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{"params": map[string]interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleVenueScores(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "venue:scores:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{"venues": []interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func parseJSONList(items []string) []json.RawMessage {
+	result := make([]json.RawMessage, 0, len(items))
+	for _, item := range items {
+		result = append(result, json.RawMessage(item))
+	}
+	return result
 }
 
 func clamp(v, lo, hi float64) float64 {
