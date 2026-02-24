@@ -445,6 +445,20 @@ func (c *Client) GetTickerPrice(ctx context.Context, symbol string) (*exchange.T
 	}, nil
 }
 
+// ── Constraints ──────────────────────────────────────────────────────────────
+
+func (c *Client) GetConstraints(_ context.Context, symbol string) (*exchange.VenueConstraints, error) {
+	return &exchange.VenueConstraints{
+		Symbol:      symbol,
+		TickSize:    0.10,
+		LotSize:     0.001,
+		MinQty:      0.001,
+		MinNotional: 5.0,
+		PostOnly:    true,
+		ReduceOnly:  true,
+	}, nil
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 func capitalize(s string) string {

@@ -145,6 +145,12 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 
 		nativeSymbol := mapSymbol(leg.Venue, intent.Symbol)
 
+		// Fetch venue constraints for price/qty rounding.
+		constraints, _ := ex.GetConstraints(ctx, nativeSymbol)
+		if constraints == nil {
+			constraints = &exchange.VenueConstraints{Symbol: nativeSymbol}
+		}
+
 		// Adjust notional if previous leg was a partial fill.
 		targetNotional := leg.NotionalUSD
 		if i > 0 && results[i-1].partialFill {
@@ -153,16 +159,29 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 				i, targetNotional, i-1)
 		}
 
-		qty := targetNotional / mid
-
-		var priceLimit float64
-		if leg.Action == "BUY" {
-			priceLimit = mid * (1 + leg.MaxSlippageBps/10000)
-		} else {
-			priceLimit = mid * (1 - leg.MaxSlippageBps/10000)
+		// Check minimum notional.
+		if constraints.MinNotional > 0 && targetNotional < constraints.MinNotional {
+			log.Printf("live: notional $%.2f below venue min $%.2f — skipping leg %d",
+				targetNotional, constraints.MinNotional, i)
+			break
 		}
 
-		// Submit order with retries.
+		qty := constraints.RoundQty(targetNotional / mid)
+		if constraints.MinQty > 0 && qty < constraints.MinQty {
+			qty = constraints.MinQty
+		}
+
+		var worstPrice float64
+		if leg.Action == "BUY" {
+			worstPrice = constraints.RoundPrice(mid * (1 + leg.MaxSlippageBps/10000))
+		} else {
+			worstPrice = constraints.RoundPrice(mid * (1 - leg.MaxSlippageBps/10000))
+		}
+
+		// Order strategy: attempt LIMIT first (saves taker fees), then IOC on retry.
+		// First attempt uses a tight limit price (mid ± 1bps) for maker rebate.
+		// If it doesn't fill, cancel/replace at progressively wider prices.
+		// Final attempt uses IOC at worst price to guarantee fill.
 		var finalOrder *exchange.OrderResponse
 		var orderErr error
 		for attempt := 0; attempt <= e.cfg.MaxRetriesPerLeg; attempt++ {
@@ -177,12 +196,29 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 				}
 			}
 
+			// Choose order type and price based on attempt number.
+			orderType := exchange.OrderTypeLimit
+			orderPrice := worstPrice
+			if attempt < e.cfg.MaxRetriesPerLeg {
+				// Early attempts: use tighter limit price for maker rebate.
+				frac := float64(attempt+1) / float64(e.cfg.MaxRetriesPerLeg+1)
+				if leg.Action == "BUY" {
+					orderPrice = constraints.RoundPrice(mid * (1 + frac*leg.MaxSlippageBps/10000))
+				} else {
+					orderPrice = constraints.RoundPrice(mid * (1 - frac*leg.MaxSlippageBps/10000))
+				}
+			} else {
+				// Final attempt: IOC at worst price to guarantee fill.
+				orderType = exchange.OrderTypeIOC
+				orderPrice = worstPrice
+			}
+
 			orderReq := exchange.OrderRequest{
 				Symbol:         nativeSymbol,
 				Side:           exchange.Side(leg.Action),
-				Type:           exchange.OrderTypeIOC,
+				Type:           orderType,
 				Quantity:       qty,
-				Price:          priceLimit,
+				Price:          orderPrice,
 				NotionalUSD:    targetNotional,
 				MaxSlippageBps: leg.MaxSlippageBps,
 				ClientOrderID:  fmt.Sprintf("%s-leg%d-r%d", intent.IntentID, i, attempt),
@@ -208,13 +244,17 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 				break
 			}
 
+			// Not filled — cancel the limit order before retrying at wider price.
+			if orderType == exchange.OrderTypeLimit {
+				_ = ex.CancelOrder(ctx, nativeSymbol, final.OrderID)
+			}
+
 			// Partial fill below minimum threshold — cancel remainder.
 			if final.FilledQty > 0 {
 				fillPct := final.FilledQty / qty
 				if fillPct < e.cfg.MinPartialFillPct {
-					log.Printf("live: partial fill %.1f%% below min %.1f%% — cancelling and retrying",
+					log.Printf("live: partial fill %.1f%% below min %.1f%% — retrying wider",
 						fillPct*100, e.cfg.MinPartialFillPct*100)
-					_ = ex.CancelOrder(ctx, nativeSymbol, final.OrderID)
 					orderErr = fmt.Errorf("partial fill below threshold")
 					continue
 				}

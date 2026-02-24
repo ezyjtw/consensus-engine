@@ -4,7 +4,10 @@
 // treasury, and reconciliation services can work against any exchange.
 package exchange
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Side represents the direction of an order.
 type Side string
@@ -171,6 +174,34 @@ type VenueInfo struct {
 	SupportedNetworks []string `json:"supported_networks"`
 	FeeTakerBps      float64  `json:"fee_taker_bps"`
 	FeeMakerBps      float64  `json:"fee_maker_bps"`
+}
+
+// VenueConstraints holds per-symbol trading rules for an exchange.
+type VenueConstraints struct {
+	Symbol       string  `json:"symbol"`
+	TickSize     float64 `json:"tick_size"`      // price step (e.g. 0.10 for BTC-PERP on Binance)
+	LotSize      float64 `json:"lot_size"`       // min qty step (e.g. 0.001)
+	MinQty       float64 `json:"min_qty"`        // min order quantity
+	MaxQty       float64 `json:"max_qty"`        // max order quantity (0 = unlimited)
+	MinNotional  float64 `json:"min_notional"`   // min notional in USD
+	PostOnly     bool    `json:"post_only"`      // whether venue supports post-only orders
+	ReduceOnly   bool    `json:"reduce_only"`    // whether venue supports reduce-only flag
+}
+
+// RoundPrice rounds a price to the nearest valid tick.
+func (vc VenueConstraints) RoundPrice(price float64) float64 {
+	if vc.TickSize <= 0 {
+		return price
+	}
+	return math.Round(price/vc.TickSize) * vc.TickSize
+}
+
+// RoundQty rounds a quantity to the nearest valid lot.
+func (vc VenueConstraints) RoundQty(qty float64) float64 {
+	if vc.LotSize <= 0 {
+		return qty
+	}
+	return math.Floor(qty/vc.LotSize) * vc.LotSize
 }
 
 // TickerPrice is a simple mid-price snapshot from an exchange.

@@ -29,6 +29,9 @@ func LoadConfig(path string) (*Config, error) {
 	if v := os.Getenv("TENANT_ID"); v != "" {
 		cfg.TenantID = v
 	}
+	if v := os.Getenv("TRANSFER_POLICY_URL"); v != "" {
+		cfg.TransferPolicyURL = v
+	}
 
 	// Defaults.
 	if cfg.TenantID == "" {

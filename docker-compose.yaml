@@ -142,9 +142,12 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      transfer-policy:
+        condition: service_started
     environment:
       <<: *common-env
       DASHBOARD_MASTER_KEY: "${DASHBOARD_MASTER_KEY}"
+      TRANSFER_POLICY_URL: "http://transfer-policy:8085"
     volumes:
       - ./configs/policies/treasury.yaml:/configs/policies/treasury.yaml:ro
 

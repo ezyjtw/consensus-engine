@@ -48,6 +48,13 @@ type Exchange interface {
 
 	// GetTickerPrice returns the current price for a symbol.
 	GetTickerPrice(ctx context.Context, symbol string) (*TickerPrice, error)
+
+	// ── Constraints ──────────────────────────────────────────────────────
+
+	// GetConstraints returns venue-specific trading rules for a symbol.
+	// Implementations may return sensible defaults if the exchange does not
+	// expose this information via API.
+	GetConstraints(ctx context.Context, symbol string) (*VenueConstraints, error)
 }
 
 // Converter is an optional interface for exchanges that support fiat-to-crypto
