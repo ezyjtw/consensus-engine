@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/ezyjtw/consensus-engine/internal/auth"
 	"github.com/ezyjtw/consensus-engine/internal/ledger"
+	"github.com/ezyjtw/consensus-engine/internal/taxuk"
 )
 
 // Gateway extends the dashboard with the full V1/V3 REST API surface.
@@ -90,6 +91,11 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	// ── V3: Reporting — CSV exports ───────────────────────────────────────
 	s.mux.HandleFunc("GET /api/reports/fills", s.auth(gw.handleReportFills))
 	s.mux.HandleFunc("GET /api/reports/pnl", s.auth(gw.handleReportPnL))
+
+	// ── UK Tax reporting (HMRC CT600) ────────────────────────────────────
+	s.mux.HandleFunc("GET /api/reports/tax/uk", s.authRole(auth.RoleAuditor, gw.handleUKTaxReport))
+	s.mux.HandleFunc("GET /api/reports/tax/uk/transactions", s.authRole(auth.RoleAuditor, gw.handleUKTaxTransactions))
+	s.mux.HandleFunc("GET /api/reports/tax/uk/gains", s.authRole(auth.RoleAuditor, gw.handleUKTaxGains))
 
 	// ── V3: SOC2 audit trail export ───────────────────────────────────────
 	s.mux.HandleFunc("GET /api/audit", s.authRole(auth.RoleAuditor, gw.handleGetAudit))
@@ -1699,4 +1705,141 @@ func extractData(msgs []redis.XMessage) []string {
 		}
 	}
 	return result
+}
+
+// ── UK Tax Reporting (HMRC) ──────────────────────────────────────────────
+
+// handleUKTaxReport generates a CT600-ready summary CSV for a UK accounting period.
+//
+// Query params:
+//
+//	?from=2025-04-06&to=2026-04-05  — accounting period (defaults to last 12 months)
+//	&gbp_rate=0.80                  — USD→GBP conversion rate (required)
+//	&limit=50000                    — max trade rows
+func (gw *Gateway) handleUKTaxReport(w http.ResponseWriter, r *http.Request) {
+	trades, gbpRate, from, to, ok := gw.loadUKTaxTrades(w, r)
+	if !ok {
+		return
+	}
+
+	rpt := taxuk.GenerateReport(gw.tenantID, from, to, gbpRate, trades, nil)
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(
+		`attachment; filename="uk_tax_summary_%s_to_%s.csv"`,
+		from.Format("20060102"), to.Format("20060102")))
+	if err := taxuk.WriteSummaryCSV(w, rpt); err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// handleUKTaxTransactions exports all trades as a GBP-denominated transaction log CSV.
+func (gw *Gateway) handleUKTaxTransactions(w http.ResponseWriter, r *http.Request) {
+	trades, _, from, to, ok := gw.loadUKTaxTrades(w, r)
+	if !ok {
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(
+		`attachment; filename="uk_tax_transactions_%s_to_%s.csv"`,
+		from.Format("20060102"), to.Format("20060102")))
+	if err := taxuk.WriteTransactionLogCSV(w, trades); err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// handleUKTaxGains exports the spot capital gains schedule CSV.
+func (gw *Gateway) handleUKTaxGains(w http.ResponseWriter, r *http.Request) {
+	trades, gbpRate, from, to, ok := gw.loadUKTaxTrades(w, r)
+	if !ok {
+		return
+	}
+
+	rpt := taxuk.GenerateReport(gw.tenantID, from, to, gbpRate, trades, nil)
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(
+		`attachment; filename="uk_tax_capital_gains_%s_to_%s.csv"`,
+		from.Format("20060102"), to.Format("20060102")))
+	if err := taxuk.WriteCapitalGainsCSV(w, rpt.SpotDisposals); err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// loadUKTaxTrades is a shared helper that fetches and converts trades for the UK tax endpoints.
+func (gw *Gateway) loadUKTaxTrades(w http.ResponseWriter, r *http.Request) (
+	trades []taxuk.TradeRecord, gbpRate float64, from, to time.Time, ok bool) {
+
+	if gw.db == nil {
+		jsonErr(w, "postgres required for tax reports", http.StatusServiceUnavailable)
+		return
+	}
+
+	gbpRate, _ = strconv.ParseFloat(r.URL.Query().Get("gbp_rate"), 64)
+	if gbpRate <= 0 {
+		jsonErr(w, "gbp_rate query parameter is required (e.g. ?gbp_rate=0.80)", http.StatusBadRequest)
+		return
+	}
+
+	from, to, limit := parseDateRange(r)
+
+	rows, err := gw.db.ExportTradesForTax(r.Context(), gw.tenantID, from, to, limit)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	trades = make([]taxuk.TradeRecord, 0, len(rows))
+	for _, row := range rows {
+		price := toFloat(row["filled_price"])
+		notional := toFloat(row["filled_notional_usd"])
+		qty := 0.0
+		if price > 0 {
+			qty = notional / price
+		}
+
+		trades = append(trades, taxuk.TradeRecord{
+			ID:          fmt.Sprint(row["id"]),
+			IntentID:    fmt.Sprint(row["intent_id"]),
+			Timestamp:   toTime(row["ts"]),
+			Symbol:      fmt.Sprint(row["symbol"]),
+			Action:      fmt.Sprint(row["action"]),
+			Venue:       fmt.Sprint(row["venue"]),
+			Market:      fmt.Sprint(row["market"]),
+			Strategy:    fmt.Sprint(row["strategy"]),
+			Quantity:    qty,
+			PriceUSD:    price,
+			NotionalUSD: notional,
+			FeesUSD:     toFloat(row["fees_usd"]),
+		})
+	}
+
+	taxuk.ConvertToGBP(trades, gbpRate)
+	ok = true
+	return
+}
+
+func toFloat(v interface{}) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case float32:
+		return float64(x)
+	case int64:
+		return float64(x)
+	default:
+		f, _ := strconv.ParseFloat(fmt.Sprint(v), 64)
+		return f
+	}
+}
+
+func toTime(v interface{}) time.Time {
+	switch x := v.(type) {
+	case time.Time:
+		return x
+	default:
+		t, _ := time.Parse(time.RFC3339, fmt.Sprint(v))
+		return t
+	}
 }
