@@ -79,6 +79,12 @@ func main() {
 
 	go alerts.Run(ctx)
 
+	// Background price poller — fetches live prices from public exchange REST
+	// APIs so the dashboard shows real-time data even without the dedicated
+	// market-data WebSocket service running.
+	poller := dashboard.NewPricePoller(rdb, tenantID, 0)
+	go poller.Run(ctx)
+
 	httpSrv := &http.Server{
 		Addr:    ":" + port,
 		Handler: srv,
