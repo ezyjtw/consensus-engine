@@ -110,6 +110,7 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 
 	for _, sym := range e.policy.Symbols {
 		venueMap := e.state[sym]
+		symStage := e.policy.stage(sym)
 
 		// ── FUNDING_CARRY (one venue: long spot, short perp) ──────────────
 		for ven, d := range venueMap {
@@ -138,7 +139,7 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 			entryFeePct := d.feeBpsTaker * 2 / 10000 * 100
 			annualNetPct := annualGrossPct - entryFeePct
 
-			threshold := e.minYield(annualNetPct)
+			threshold := e.minYield(sym, annualNetPct)
 			if annualNetPct < threshold {
 				e.Rejected["carry_below_threshold"]++
 				continue
@@ -150,10 +151,19 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 				continue
 			}
 
+			// OBSERVE stage: log the signal but emit no intent.
+			if symStage == StageObserve {
+				e.Emitted["carry_observe"]++
+				log.Printf("funding: CARRY [OBSERVE] sym=%s venue=%s net_annual=%.2f%% (no intent emitted)",
+					sym, ven, annualNetPct)
+				continue
+			}
+
 			// Volatility gating: reduce position size when realized vol is elevated.
 			symNotional := e.policy.maxNotional(sym)
 			notional := symNotional
 			notional = e.applyVolGate(ven, sym, notional)
+			notional = e.applyStageNotional(sym, notional)
 
 			// Bonus: increase notional slightly in optimal entry window (just after reset).
 			if optimalEntry && notional == symNotional {
@@ -162,11 +172,12 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 
 			symSlippage := e.policy.maxSlippage(sym)
 			intent := e.buildCarryIntent(tenantID, sym, ven, d, notional, annualNetPct, symSlippage, nowMs)
+			e.applyStageConstraints(sym, &intent)
 			intents = append(intents, intent)
 			e.cooldown[key] = nowMs
 			e.Emitted[StrategyFundingCarry]++
-			log.Printf("funding: CARRY intent sym=%s venue=%s net_annual=%.2f%% notional=%.0f",
-				sym, ven, annualNetPct, notional)
+			log.Printf("funding: CARRY intent sym=%s venue=%s stage=%s net_annual=%.2f%% notional=%.0f",
+				sym, ven, symStage, annualNetPct, notional)
 		}
 
 		// ── FUNDING_CARRY_REVERSE (one venue: short spot, long perp when rate < 0)
@@ -196,7 +207,7 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 			entryFeePct := d.feeBpsTaker * 2 / 10000 * 100
 			annualNetPct := annualGrossPct - entryFeePct
 
-			threshold := e.minYield(annualNetPct)
+			threshold := e.minYield(sym, annualNetPct)
 			if annualNetPct < threshold {
 				e.Rejected["reverse_carry_below_threshold"]++
 				continue
@@ -208,16 +219,26 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 				continue
 			}
 
+			// OBSERVE stage: log the signal but emit no intent.
+			if symStage == StageObserve {
+				e.Emitted["reverse_carry_observe"]++
+				log.Printf("funding: REVERSE CARRY [OBSERVE] sym=%s venue=%s net_annual=%.2f%% (no intent emitted)",
+					sym, ven, annualNetPct)
+				continue
+			}
+
 			notional := e.policy.maxNotional(sym)
 			notional = e.applyVolGate(ven, sym, notional)
+			notional = e.applyStageNotional(sym, notional)
 
 			symSlippage := e.policy.maxSlippage(sym)
 			intent := e.buildReverseCarryIntent(tenantID, sym, ven, d, notional, annualNetPct, symSlippage, nowMs)
+			e.applyStageConstraints(sym, &intent)
 			intents = append(intents, intent)
 			e.cooldown[key] = nowMs
 			e.Emitted[StrategyFundingCarryReverse]++
-			log.Printf("funding: REVERSE CARRY intent sym=%s venue=%s net_annual=%.2f%% notional=%.0f rate=%.6f",
-				sym, ven, annualNetPct, notional, d.fundingRate)
+			log.Printf("funding: REVERSE CARRY intent sym=%s venue=%s stage=%s net_annual=%.2f%% notional=%.0f rate=%.6f",
+				sym, ven, symStage, annualNetPct, notional, d.fundingRate)
 		}
 
 		// ── FUNDING_DIFFERENTIAL (cross-venue: long low-rate, short high-rate) ─
@@ -260,7 +281,7 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 				annualGrossPct := (rateB - rateA) * 3 * 365 * 100
 				feePct := (dA.feeBpsTaker+dB.feeBpsTaker) * 2 / 10000 * 100
 				annualNetPct := annualGrossPct - feePct
-				threshold := e.minYield(annualNetPct)
+				threshold := e.minYield(sym, annualNetPct)
 				if annualNetPct < threshold {
 					e.Rejected["diff_below_threshold"]++
 					continue
@@ -278,38 +299,64 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 					continue
 				}
 
+				// OBSERVE stage: log the signal but emit no intent.
+				if symStage == StageObserve {
+					e.Emitted["diff_observe"]++
+					log.Printf("funding: DIFF [OBSERVE] sym=%s long=%s short=%s diff=%.2fbps net_annual=%.2f%% (no intent emitted)",
+						sym, vA, vB, diffBps, annualNetPct)
+					continue
+				}
+
 				// Volatility gating: use the higher vol of the two venues.
 				notional := e.policy.maxNotional(sym)
 				notional = e.applyVolGate(vA, sym, notional)
 				notional = e.applyVolGate(vB, sym, notional)
+				notional = e.applyStageNotional(sym, notional)
 
 				symSlippage := e.policy.maxSlippage(sym)
 				midPrice := (dA.markPrice + dB.markPrice) / 2
 				intent := e.buildDiffIntent(tenantID, sym, vA, vB, dA, dB,
 					notional, annualNetPct, diffBps, midPrice, symSlippage, nowMs)
+				e.applyStageConstraints(sym, &intent)
 				intents = append(intents, intent)
 				e.cooldown[key] = nowMs
 				e.Emitted[StrategyFundingDifferential]++
-				log.Printf("funding: DIFF intent sym=%s long=%s short=%s diff=%.2fbps net_annual=%.2f%% notional=%.0f",
-					sym, vA, vB, diffBps, annualNetPct, notional)
+				log.Printf("funding: DIFF intent sym=%s long=%s short=%s stage=%s diff=%.2fbps net_annual=%.2f%% notional=%.0f",
+					sym, vA, vB, symStage, diffBps, annualNetPct, notional)
 			}
 		}
 	}
 	return intents
 }
 
-func (e *Engine) minYield(annualNetPct float64) float64 {
+func (e *Engine) minYield(symbol string, annualNetPct float64) float64 {
 	// HIGH quality: use HIGH threshold; MED/LOW: use MED threshold.
-	// (Funding strategies don't consume consensus quality directly in V1.)
-	if t, ok := e.policy.MinAnnualYieldPct["HIGH"]; ok {
+	// Per-symbol overrides take precedence over global defaults.
+	if t, ok := e.policy.minYieldForSymbol(symbol, "HIGH"); ok {
 		if annualNetPct >= t {
 			return t
 		}
 	}
-	if t, ok := e.policy.MinAnnualYieldPct["MED"]; ok {
+	if t, ok := e.policy.minYieldForSymbol(symbol, "MED"); ok {
 		return t
 	}
 	return 8.0
+}
+
+// applyStageNotional applies the CONSERVATIVE size scaling factor to notional.
+// For non-CONSERVATIVE stages, returns notional unchanged.
+func (e *Engine) applyStageNotional(sym string, notional float64) float64 {
+	if e.policy.stage(sym) == StageConservative {
+		return notional * e.policy.sizeScale(sym)
+	}
+	return notional
+}
+
+// applyStageConstraints sets ForcePaperMode on intents from PAPER-stage symbols.
+func (e *Engine) applyStageConstraints(sym string, intent *arb.TradeIntent) {
+	if e.policy.stage(sym) == StagePaper {
+		intent.Constraints.ForcePaperMode = true
+	}
 }
 
 // applyVolGate reduces notional when realized vol exceeds the configured threshold.

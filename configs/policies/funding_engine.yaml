@@ -51,28 +51,62 @@ cooldown_s: 300
 # Per-symbol funding parameter overrides.
 # Mid-caps use smaller positions due to thinner order books, and wider slippage
 # tolerance to account for wider spreads.
+#
+# Staged rollout for mid-caps:
+#   OBSERVE      — monitor rates & log signals; no intents emitted.
+#   PAPER        — emit intents tagged force_paper_mode for simulated fills.
+#   CONSERVATIVE — real intents at reduced notional (size_scale_factor × max).
+#   FULL         — normal operation (default, backwards-compatible).
+#
+# Recommended progression: run OBSERVE for 1-2 weeks to validate data quality,
+# then PAPER for 2 weeks to track theoretical P&L, then CONSERVATIVE for 2-4
+# weeks to verify real fills, then promote to FULL.
 symbol_overrides:
   SOL-PERP:
+    stage: CONSERVATIVE
+    size_scale_factor: 0.5
     max_notional_usd: 20000
     max_slippage_bps: 12.0
   DOGE-PERP:
+    stage: PAPER
     max_notional_usd: 10000
     max_slippage_bps: 18.0
+    min_annual_yield_pct:
+      HIGH: 12.0
+      MED: 18.0
   XRP-PERP:
+    stage: CONSERVATIVE
+    size_scale_factor: 0.5
     max_notional_usd: 20000
     max_slippage_bps: 12.0
   AVAX-PERP:
+    stage: PAPER
     max_notional_usd: 10000
     max_slippage_bps: 15.0
+    min_annual_yield_pct:
+      HIGH: 12.0
+      MED: 18.0
   LINK-PERP:
+    stage: PAPER
     max_notional_usd: 10000
     max_slippage_bps: 15.0
+    min_annual_yield_pct:
+      HIGH: 12.0
+      MED: 18.0
   SUI-PERP:
+    stage: OBSERVE
     max_notional_usd: 8000
     max_slippage_bps: 18.0
+    min_annual_yield_pct:
+      HIGH: 15.0
+      MED: 22.0
   PEPE-PERP:
+    stage: OBSERVE
     max_notional_usd: 5000
     max_slippage_bps: 25.0
+    min_annual_yield_pct:
+      HIGH: 15.0
+      MED: 22.0
 
 redis:
   addr: "localhost:6379"
