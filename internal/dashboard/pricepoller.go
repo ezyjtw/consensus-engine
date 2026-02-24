@@ -117,6 +117,7 @@ func (p *PricePoller) poll(ctx context.Context) {
 }
 
 func (p *PricePoller) publish(ctx context.Context, q consensus.Quote) error {
+	q.SchemaVersion = 1
 	data, err := json.Marshal(q)
 	if err != nil {
 		return err

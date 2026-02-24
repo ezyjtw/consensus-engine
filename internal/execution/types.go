@@ -4,6 +4,7 @@ import "github.com/ezyjtw/consensus-engine/internal/arb"
 
 // ExecutionEvent is emitted for every order lifecycle transition.
 type ExecutionEvent struct {
+	SchemaVersion        int     `json:"schema_version"`
 	EventType            string  `json:"event_type"`             // ORDER_FILLED | ORDER_REJECTED | HEDGE_FAILED | LEG_PARTIAL | HEDGE_DRIFT
 	IntentID             string  `json:"intent_id"`
 	LegIndex             int     `json:"leg_index"`
@@ -34,6 +35,7 @@ type FillLeg struct {
 }
 
 type SimulatedFill struct {
+	SchemaVersion         int       `json:"schema_version"`
 	IntentID              string    `json:"intent_id"`
 	Strategy              string    `json:"strategy"`
 	Symbol                string    `json:"symbol"`

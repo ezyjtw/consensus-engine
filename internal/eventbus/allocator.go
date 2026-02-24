@@ -137,6 +137,7 @@ func (b *AllocatorBus) ReadIntents(ctx context.Context) ([]arb.TradeIntent, erro
 
 // PublishApproved appends an approved intent to the output stream.
 func (b *AllocatorBus) PublishApproved(ctx context.Context, intent arb.TradeIntent) error {
+	intent.SchemaVersion = 1
 	return b.sc.Publish(ctx, b.cfg.OutputStream, intent)
 }
 

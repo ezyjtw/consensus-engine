@@ -111,6 +111,7 @@ func (b *Bus) ReadMarketUpdates(ctx context.Context) ([]consensus.Quote, error) 
 
 func (b *Bus) PublishConsensus(ctx context.Context,
 	u consensus.ConsensusUpdate) error {
+	u.SchemaVersion = 1
 	data, err := json.Marshal(u)
 	if err != nil {
 		return err
@@ -123,6 +124,7 @@ func (b *Bus) PublishConsensus(ctx context.Context,
 
 func (b *Bus) PublishAnomaly(ctx context.Context,
 	a consensus.VenueAnomaly) error {
+	a.SchemaVersion = 1
 	data, err := json.Marshal(a)
 	if err != nil {
 		return err
@@ -138,6 +140,7 @@ func (b *Bus) PublishAnomaly(ctx context.Context,
 // after a restart without querying Postgres.
 func (b *Bus) PublishStatusUpdate(ctx context.Context,
 	s consensus.VenueStatusUpdate) error {
+	s.SchemaVersion = 1
 	data, err := json.Marshal(s)
 	if err != nil {
 		return err

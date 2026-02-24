@@ -50,7 +50,8 @@ type IntentDebug struct {
 // TradeIntent is the primary output of strategy engines: a multi-leg opportunity
 // ready to be validated by the Capital Allocator and executed by the Execution Router.
 type TradeIntent struct {
-	TenantID    string            `json:"tenant_id"`
+	SchemaVersion int               `json:"schema_version"`
+	TenantID      string            `json:"tenant_id"`
 	IntentID    string            `json:"intent_id"`
 	Strategy    string            `json:"strategy"`
 	Symbol      string            `json:"symbol"`

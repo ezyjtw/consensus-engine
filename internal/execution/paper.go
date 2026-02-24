@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -107,17 +108,38 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 		return nil, nil
 	}
 
-	latencyMs := e.cfg.SimLatencyMs
-	fillTs := now + latencyMs
-
 	var events []ExecutionEvent
 	var buyPrice, sellPrice float64
 	var totalFees float64
 	adverseSelection := false
-
-	slipBps := e.cfg.SimSlippageBps
+	var maxLatencyMs int64
 
 	for i, leg := range intent.Legs {
+		// Look up per-venue profile; fall back to global defaults.
+		profile, hasProfile := e.cfg.VenueProfiles[leg.Venue]
+		var latencyMs int64
+		var slipBps, feeBps float64
+		if hasProfile {
+			// Stochastic latency within venue's observed range.
+			span := profile.LatencyMaxMs - profile.LatencyMinMs
+			if span > 0 {
+				latencyMs = profile.LatencyMinMs + rand.Int63n(span)
+			} else {
+				latencyMs = profile.LatencyMinMs
+			}
+			// Depth-based slippage: base + slope per $10k notional.
+			slipBps = profile.SlippageBps + profile.DepthSlopeBps*(leg.NotionalUSD/10000)
+			feeBps = profile.FeeBpsTaker
+		} else {
+			latencyMs = e.cfg.SimLatencyMs
+			slipBps = e.cfg.SimSlippageBps
+			feeBps = 4.0
+		}
+		if latencyMs > maxLatencyMs {
+			maxLatencyMs = latencyMs
+		}
+		fillTs := now + latencyMs
+
 		var fillPrice float64
 		if leg.Action == "BUY" {
 			fillPrice = mid * (1 + slipBps/10000)
@@ -137,8 +159,16 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 			}
 		}
 
+		// Probabilistic partial fill based on venue profile.
+		filledNotional := leg.NotionalUSD
+		eventType := "ORDER_FILLED"
+		if hasProfile && profile.PartialFillPct > 0 && rand.Float64() < profile.PartialFillPct {
+			filledNotional = leg.NotionalUSD * (0.3 + rand.Float64()*0.6) // 30-90% fill
+			eventType = "LEG_PARTIAL"
+		}
+
 		slippageActual := math.Abs(fillPrice-mid) / mid * 10000
-		feesUSD := leg.NotionalUSD * 4 / 10000 // 4bps taker
+		feesUSD := filledNotional * feeBps / 10000
 		totalFees += feesUSD
 
 		if slippageActual > e.cfg.AdverseSelBps {
@@ -151,7 +181,7 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 		}
 
 		events = append(events, ExecutionEvent{
-			EventType:             "ORDER_FILLED",
+			EventType:             eventType,
 			IntentID:              intent.IntentID,
 			LegIndex:              i,
 			Venue:                 leg.Venue,
@@ -160,7 +190,7 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 			Strategy:              intent.Strategy,
 			Market:                market,
 			RequestedNotionalUSD:  leg.NotionalUSD,
-			FilledNotionalUSD:     leg.NotionalUSD,
+			FilledNotionalUSD:     filledNotional,
 			FilledPrice:           fillPrice,
 			SlippageBpsActual:     slippageActual,
 			SlippageBpsAllowed:    leg.MaxSlippageBps,
@@ -173,16 +203,16 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 
 		// Update virtual position.
 		posKey := fmt.Sprintf("%s:%s:%s", leg.Venue, intent.Symbol, market)
-		qty := leg.NotionalUSD / fillPrice
+		qty := filledNotional / fillPrice
 		if leg.Action == "SELL" {
 			qty = -qty
 		}
-		e.updatePosition(posKey, qty, fillPrice, leg.NotionalUSD)
+		e.updatePosition(posKey, qty, fillPrice, filledNotional)
 	}
 
 	netPnL := 0.0
 	if buyPrice > 0 && sellPrice > 0 {
-		notional := intent.Legs[0].NotionalUSD
+		notional := events[0].FilledNotionalUSD
 		netPnL = (sellPrice-buyPrice)/mid*notional - totalFees
 	}
 
@@ -209,8 +239,8 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 		Symbol:                   intent.Symbol,
 		Legs:                     fillLegs,
 		TsSignalMs:               intent.TsMs,
-		TsFillSimulatedMs:        fillTs,
-		LatencyMs:                latencyMs,
+		TsFillSimulatedMs:        now + maxLatencyMs,
+		LatencyMs:                maxLatencyMs,
 		EdgeAtSignalBps:          edgeAtSignal,
 		EdgeAtFillBps:            edgeAtFill,
 		EdgeCapturedBps:          edgeAtFill,
@@ -218,7 +248,7 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 		FillPriceBuy:             buyPrice,
 		FillPriceSell:            sellPrice,
 		FeesAssumedUSD:           totalFees,
-		SlippageAssumedBps:       slipBps,
+		SlippageAssumedBps:       e.cfg.SimSlippageBps,
 		NetPnLUSD:                netPnL,
 		IntentExpired:            false,
 		Mode:                     e.cfg.TradingMode,

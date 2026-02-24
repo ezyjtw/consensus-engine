@@ -80,8 +80,11 @@ func main() {
 		if err != nil {
 			log.Fatalf("failed to build exchange registry: %v", err)
 		}
-		exec = execution.NewLiveExecutor(cfg, priceCache, registry)
+		liveExec := execution.NewLiveExecutor(cfg, priceCache, registry)
+		exec = liveExec
 		log.Printf("execution-router: LIVE executor active — real orders will be placed")
+		log.Printf("execution-router: micro-live caps: order=$%.0f daily=$%.0f",
+			cfg.LiveMaxOrderNotionalUSD, cfg.LiveMaxDailyNotionalUSD)
 	default:
 		exec = execution.NewPaperExecutor(cfg, priceCache)
 	}
@@ -89,6 +92,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Start periodic position reconciliation for LIVE mode.
+	if liveExec, ok := exec.(*execution.LiveExecutor); ok {
+		venues := []string{"binance", "okx", "bybit", "deribit", "coinbase"}
+		liveExec.StartPeriodicReconciliation(ctx, venues, 30000)
+	}
 
 	// Background goroutine: keep consensus price cache warm.
 	go func() {

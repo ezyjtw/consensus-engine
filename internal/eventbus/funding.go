@@ -111,6 +111,7 @@ func (b *FundingBus) ReadExecutionEvents(ctx context.Context) ([]execution.Execu
 
 // PublishIntent appends a TradeIntent to the intents stream.
 func (b *FundingBus) PublishIntent(ctx context.Context, intent arb.TradeIntent) error {
+	intent.SchemaVersion = 1
 	return b.sc.Publish(ctx, b.cfg.OutputIntents, intent)
 }
 

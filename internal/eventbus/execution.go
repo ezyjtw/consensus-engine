@@ -100,11 +100,13 @@ func (b *ExecutionBus) ReadConsensusUpdates(ctx context.Context) ([]consensus.Co
 
 // PublishEvent appends an execution event to the events stream.
 func (b *ExecutionBus) PublishEvent(ctx context.Context, ev execution.ExecutionEvent) error {
+	ev.SchemaVersion = 1
 	return b.sc.Publish(ctx, b.cfg.EventsStream, ev)
 }
 
 // PublishFill appends a simulated fill to the fills stream.
 func (b *ExecutionBus) PublishFill(ctx context.Context, fill *execution.SimulatedFill) error {
+	fill.SchemaVersion = 1
 	return b.sc.Publish(ctx, b.cfg.FillsStream, fill)
 }
 

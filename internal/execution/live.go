@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/ezyjtw/consensus-engine/internal/arb"
@@ -32,11 +33,46 @@ type LiveExecutor struct {
 	cfg        *Config
 	priceCache *PriceCache
 	registry   *exchange.Registry
+
+	// Micro-live graduation: rolling daily notional tracking.
+	dailyMu       sync.Mutex
+	dailyFills    []dailyFillEntry
+	openOrdersMu  sync.Mutex
+	openOrdersCnt int
+}
+
+// dailyFillEntry tracks a fill timestamp and notional for rolling daily cap.
+type dailyFillEntry struct {
+	tsMs       int64
+	notionalUSD float64
 }
 
 // NewLiveExecutor creates a live executor backed by real exchange adapters.
 func NewLiveExecutor(cfg *Config, cache *PriceCache, registry *exchange.Registry) *LiveExecutor {
 	return &LiveExecutor{cfg: cfg, priceCache: cache, registry: registry}
+}
+
+// rollingDailyNotional returns the total notional filled in the last 24 hours.
+func (e *LiveExecutor) rollingDailyNotional(nowMs int64) float64 {
+	cutoff := nowMs - 86_400_000 // 24 hours
+	var total float64
+	// Prune old entries while summing.
+	kept := e.dailyFills[:0]
+	for _, f := range e.dailyFills {
+		if f.tsMs >= cutoff {
+			total += f.notionalUSD
+			kept = append(kept, f)
+		}
+	}
+	e.dailyFills = kept
+	return total
+}
+
+// recordDailyFill adds a fill to the rolling daily tracker.
+func (e *LiveExecutor) recordDailyFill(tsMs int64, notionalUSD float64) {
+	e.dailyMu.Lock()
+	defer e.dailyMu.Unlock()
+	e.dailyFills = append(e.dailyFills, dailyFillEntry{tsMs: tsMs, notionalUSD: notionalUSD})
 }
 
 // Execute places real orders for all legs in an approved intent, sequentially.
@@ -56,6 +92,47 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 			IntentExpired: true,
 			Mode:          e.cfg.TradingMode,
 			TenantID:      e.cfg.TenantID,
+		}
+	}
+
+	// Micro-live graduation caps: enforce per-order and daily notional limits.
+	totalIntentNotional := 0.0
+	for _, leg := range intent.Legs {
+		totalIntentNotional += leg.NotionalUSD
+	}
+	if e.cfg.LiveMaxOrderNotionalUSD > 0 {
+		for _, leg := range intent.Legs {
+			if leg.NotionalUSD > e.cfg.LiveMaxOrderNotionalUSD {
+				log.Printf("live: leg notional $%.0f exceeds micro-live cap $%.0f — rejecting",
+					leg.NotionalUSD, e.cfg.LiveMaxOrderNotionalUSD)
+				return []ExecutionEvent{{
+					EventType: "ORDER_REJECTED",
+					IntentID:  intent.IntentID,
+					Strategy:  intent.Strategy,
+					Symbol:    intent.Symbol,
+					TsMs:      now,
+					TenantID:  e.cfg.TenantID,
+					Mode:      e.cfg.TradingMode,
+				}}, nil
+			}
+		}
+	}
+	if e.cfg.LiveMaxDailyNotionalUSD > 0 {
+		e.dailyMu.Lock()
+		rollingTotal := e.rollingDailyNotional(now)
+		e.dailyMu.Unlock()
+		if rollingTotal+totalIntentNotional > e.cfg.LiveMaxDailyNotionalUSD {
+			log.Printf("live: daily notional $%.0f + $%.0f would exceed micro-live cap $%.0f — rejecting",
+				rollingTotal, totalIntentNotional, e.cfg.LiveMaxDailyNotionalUSD)
+			return []ExecutionEvent{{
+				EventType: "ORDER_REJECTED",
+				IntentID:  intent.IntentID,
+				Strategy:  intent.Strategy,
+				Symbol:    intent.Symbol,
+				TsMs:      now,
+				TenantID:  e.cfg.TenantID,
+				Mode:      e.cfg.TradingMode,
+			}}, nil
 		}
 	}
 
@@ -299,6 +376,7 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 		isPartial := finalOrder.Status == exchange.OrderStatusPartiallyFilled ||
 			(finalOrder.FilledQty > 0 && finalOrder.FilledQty < qty*0.99)
 
+		fillTsMs := time.Now().UnixMilli()
 		results[i] = legResult{
 			filled:      true,
 			filledQty:   finalOrder.FilledQty,
@@ -309,8 +387,11 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 			venue:       leg.Venue,
 			nativeSym:   nativeSymbol,
 			partialFill: isPartial,
-			fillTsMs:    time.Now().UnixMilli(),
+			fillTsMs:    fillTsMs,
 		}
+
+		// Track notional for micro-live daily cap.
+		e.recordDailyFill(fillTsMs, filledNotional)
 
 		if leg.Action == "BUY" {
 			buyPrice = fillPrice
@@ -592,6 +673,97 @@ func (e *LiveExecutor) reconcileFills(
 			}
 		}
 	}
+}
+
+// ── Periodic position reconciliation ──────────────────────────────────────
+
+// ReconcilePositions performs a position truth pull across all venues.
+// Fetches real positions from each exchange and logs discrepancies.
+func (e *LiveExecutor) ReconcilePositions(ctx context.Context, venues []string) []ExecutionEvent {
+	var events []ExecutionEvent
+	now := time.Now().UnixMilli()
+
+	for _, venue := range venues {
+		ex, err := e.registry.Get(ctx, venue)
+		if err != nil {
+			log.Printf("live-recon: cannot get exchange %s: %v", venue, err)
+			continue
+		}
+
+		positions, err := ex.GetPositions(ctx)
+		if err != nil {
+			log.Printf("live-recon: GetPositions failed on %s: %v", venue, err)
+			events = append(events, ExecutionEvent{
+				EventType: "RECON_FAILED",
+				Venue:     venue,
+				TsMs:      now,
+				TenantID:  e.cfg.TenantID,
+				Mode:      e.cfg.TradingMode,
+			})
+			continue
+		}
+
+		balances, err := ex.GetBalances(ctx)
+		if err != nil {
+			log.Printf("live-recon: GetBalances failed on %s: %v", venue, err)
+		}
+
+		for _, pos := range positions {
+			if pos.Quantity == 0 {
+				continue
+			}
+			log.Printf("live-recon: POSITION TRUTH venue=%s sym=%s side=%s qty=%.6f notional=$%.2f pnl=$%.2f",
+				venue, pos.Symbol, pos.Side, pos.Quantity, pos.NotionalUSD, pos.UnrealizedPnL)
+
+			events = append(events, ExecutionEvent{
+				EventType:         "POSITION_TRUTH",
+				Venue:             venue,
+				Symbol:            pos.Symbol,
+				Action:            pos.Side,
+				FilledNotionalUSD: pos.NotionalUSD,
+				FilledPrice:       pos.MarkPrice,
+				TsMs:              now,
+				TenantID:          e.cfg.TenantID,
+				Mode:              e.cfg.TradingMode,
+			})
+		}
+
+		totalUSD := 0.0
+		for _, bal := range balances {
+			if bal.USDValue > 0 {
+				totalUSD += bal.USDValue
+			}
+		}
+		if totalUSD > 0 {
+			log.Printf("live-recon: BALANCE TRUTH venue=%s total_usd=$%.2f", venue, totalUSD)
+		}
+	}
+
+	return events
+}
+
+// StartPeriodicReconciliation launches a background goroutine that polls
+// exchange positions every intervalMs milliseconds.
+func (e *LiveExecutor) StartPeriodicReconciliation(ctx context.Context, venues []string, intervalMs int64) {
+	if intervalMs <= 0 {
+		intervalMs = 30000
+	}
+	go func() {
+		ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				events := e.ReconcilePositions(ctx, venues)
+				if len(events) > 0 {
+					log.Printf("live-recon: periodic recon produced %d events", len(events))
+				}
+			}
+		}
+	}()
+	log.Printf("live-recon: periodic reconciliation started (interval=%dms, venues=%v)", intervalMs, venues)
 }
 
 // mapSymbol converts canonical symbols (e.g. "BTC-PERP") to exchange-native format.

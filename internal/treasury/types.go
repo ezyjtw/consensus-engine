@@ -6,7 +6,8 @@ import "time"
 
 // DepositEvent represents a detected incoming deposit.
 type DepositEvent struct {
-	TenantID  string    `json:"tenant_id"`
+	SchemaVersion int       `json:"schema_version"`
+	TenantID      string    `json:"tenant_id"`
 	DepositID string    `json:"deposit_id"`
 	Source    string    `json:"source"`       // venue where deposit landed (e.g. "coinbase")
 	Asset     string    `json:"asset"`        // deposited asset (e.g. "GBP", "USD", "USDC")
@@ -18,7 +19,8 @@ type DepositEvent struct {
 
 // ConversionEvent records a fiat/crypto→USDC conversion.
 type ConversionEvent struct {
-	TenantID   string  `json:"tenant_id"`
+	SchemaVersion int     `json:"schema_version"`
+	TenantID      string  `json:"tenant_id"`
 	ConvertID  string  `json:"convert_id"`
 	FromAsset  string  `json:"from_asset"`
 	ToAsset    string  `json:"to_asset"`
@@ -40,7 +42,8 @@ type DistributionLeg struct {
 
 // DistributionEvent records a multi-venue fund distribution.
 type DistributionEvent struct {
-	TenantID    string            `json:"tenant_id"`
+	SchemaVersion int               `json:"schema_version"`
+	TenantID      string            `json:"tenant_id"`
 	DepositID   string            `json:"deposit_id"`
 	TotalAmount float64           `json:"total_amount"`
 	Legs        []DistributionLeg `json:"legs"`
@@ -49,7 +52,8 @@ type DistributionEvent struct {
 
 // SweepEvent records a profit sweep back to the treasury venue.
 type SweepEvent struct {
-	TenantID    string  `json:"tenant_id"`
+	SchemaVersion int     `json:"schema_version"`
+	TenantID      string  `json:"tenant_id"`
 	FromVenue   string  `json:"from_venue"`
 	ToVenue     string  `json:"to_venue"`
 	Asset       string  `json:"asset"`
@@ -61,7 +65,8 @@ type SweepEvent struct {
 
 // ReconciliationReport is the output of a balance reconciliation check.
 type ReconciliationReport struct {
-	TenantID   string              `json:"tenant_id"`
+	SchemaVersion int                 `json:"schema_version"`
+	TenantID      string              `json:"tenant_id"`
 	TsMs       int64               `json:"ts_ms"`
 	TotalUSD   float64             `json:"total_usd"`
 	Venues     []VenueReconcile    `json:"venues"`
