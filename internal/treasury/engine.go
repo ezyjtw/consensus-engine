@@ -9,6 +9,7 @@ import (
 
 	"github.com/ezyjtw/consensus-engine/internal/exchange"
 	"github.com/ezyjtw/consensus-engine/internal/eventbus"
+	"github.com/ezyjtw/consensus-engine/internal/transfer"
 )
 
 // Engine runs the treasury pipeline: detect deposits → convert → distribute.
@@ -17,16 +18,24 @@ type Engine struct {
 	registry *exchange.Registry
 	bus      *eventbus.StreamClient
 	seen     *LastSeen
+	policy   *transfer.Client // nil if transfer-policy not configured
 }
 
 // NewEngine creates a treasury engine.
 func NewEngine(cfg *Config, registry *exchange.Registry, bus *eventbus.StreamClient) *Engine {
-	return &Engine{
+	e := &Engine{
 		cfg:      cfg,
 		registry: registry,
 		bus:      bus,
 		seen:     NewLastSeen(),
 	}
+	if cfg.TransferPolicyURL != "" {
+		e.policy = transfer.NewClient(cfg.TransferPolicyURL)
+		log.Printf("treasury: transfer-policy enforcement enabled (%s)", cfg.TransferPolicyURL)
+	} else {
+		log.Printf("treasury: WARNING: transfer-policy not configured — withdrawals unchecked")
+	}
+	return e
 }
 
 // RunDepositWatcher polls the treasury venue for new deposits and triggers
@@ -223,6 +232,31 @@ func (e *Engine) distribute(ctx context.Context, depositID, asset string, totalA
 			continue
 		}
 
+		// Enforce transfer policy before withdrawal.
+		if e.policy != nil {
+			policyReq := transfer.Request{
+				ID:          fmt.Sprintf("dist-%s-%s", depositID, alloc.Venue),
+				TenantID:    e.cfg.TenantID,
+				FromVenue:   e.cfg.TreasuryVenue,
+				ToVenue:     alloc.Venue,
+				ToAddress:   depAddr.Address,
+				Asset:       asset,
+				AmountUSD:   amount,
+				RequestedBy: "treasury-engine",
+			}
+			if err := e.policy.MustApprove(ctx, policyReq); err != nil {
+				log.Printf("treasury: transfer-policy DENIED distribution to %s: %v", alloc.Venue, err)
+				legs = append(legs, DistributionLeg{
+					Venue:   alloc.Venue,
+					Asset:   asset,
+					Amount:  amount,
+					Network: alloc.Network,
+					Status:  "POLICY_DENIED",
+				})
+				continue
+			}
+		}
+
 		// Withdraw from treasury venue to target venue.
 		resp, err := ex.Withdraw(ctx, exchange.WithdrawRequest{
 			Asset:   asset,
@@ -327,6 +361,24 @@ func (e *Engine) executeSweep(ctx context.Context) {
 			sweepable := bal.Free - e.cfg.SweepThresholdUSD
 			if sweepable <= 0 {
 				continue
+			}
+
+			// Enforce transfer policy before sweep withdrawal.
+			if e.policy != nil {
+				policyReq := transfer.Request{
+					ID:          fmt.Sprintf("sweep-%s-%d", alloc.Venue, time.Now().UnixMilli()),
+					TenantID:    e.cfg.TenantID,
+					FromVenue:   alloc.Venue,
+					ToVenue:     e.cfg.TreasuryVenue,
+					ToAddress:   depAddr.Address,
+					Asset:       e.cfg.ConvertTo,
+					AmountUSD:   sweepable,
+					RequestedBy: "treasury-engine",
+				}
+				if err := e.policy.MustApprove(ctx, policyReq); err != nil {
+					log.Printf("treasury: transfer-policy DENIED sweep from %s: %v", alloc.Venue, err)
+					continue
+				}
 			}
 
 			resp, err := ex.Withdraw(ctx, exchange.WithdrawRequest{

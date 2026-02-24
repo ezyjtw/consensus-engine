@@ -88,19 +88,20 @@ type AllocationWeight struct {
 
 // Config holds the treasury service configuration.
 type Config struct {
-	TenantID          string             `yaml:"tenant_id"`
-	TreasuryVenue     string             `yaml:"treasury_venue"`      // e.g. "coinbase"
-	PollIntervalSec   int                `yaml:"poll_interval_sec"`
-	AutoConvert       bool               `yaml:"auto_convert"`
-	ConvertTo         string             `yaml:"convert_to"`          // e.g. "USDC"
-	MinDistributeUSD  float64            `yaml:"min_distribute_usd"`  // minimum to trigger distribution
-	Allocation        []AllocationWeight `yaml:"allocation"`
-	SweepEnabled      bool               `yaml:"sweep_enabled"`
-	SweepIntervalMin  int                `yaml:"sweep_interval_min"`
-	SweepThresholdUSD float64            `yaml:"sweep_threshold_usd"` // min profit to sweep
-	ReconcileIntervalMin int             `yaml:"reconcile_interval_min"`
-	DriftAlertPct     float64            `yaml:"drift_alert_pct"`     // trigger alert above this drift
-	Redis             RedisConf          `yaml:"redis"`
+	TenantID            string             `yaml:"tenant_id"`
+	TreasuryVenue       string             `yaml:"treasury_venue"`        // e.g. "coinbase"
+	PollIntervalSec     int                `yaml:"poll_interval_sec"`
+	AutoConvert         bool               `yaml:"auto_convert"`
+	ConvertTo           string             `yaml:"convert_to"`            // e.g. "USDC"
+	MinDistributeUSD    float64            `yaml:"min_distribute_usd"`    // minimum to trigger distribution
+	Allocation          []AllocationWeight `yaml:"allocation"`
+	SweepEnabled        bool               `yaml:"sweep_enabled"`
+	SweepIntervalMin    int                `yaml:"sweep_interval_min"`
+	SweepThresholdUSD   float64            `yaml:"sweep_threshold_usd"`   // min profit to sweep
+	ReconcileIntervalMin int               `yaml:"reconcile_interval_min"`
+	DriftAlertPct       float64            `yaml:"drift_alert_pct"`       // trigger alert above this drift
+	TransferPolicyURL   string             `yaml:"transfer_policy_url"`   // e.g. "http://transfer-policy:8085"
+	Redis               RedisConf          `yaml:"redis"`
 }
 
 // RedisConf holds Redis connection settings.

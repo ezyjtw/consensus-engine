@@ -431,6 +431,20 @@ func (c *Client) GetFiatDeposits(ctx context.Context, currency string, limit int
 	return records, nil
 }
 
+// ── Constraints ──────────────────────────────────────────────────────────────
+
+func (c *Client) GetConstraints(_ context.Context, symbol string) (*exchange.VenueConstraints, error) {
+	return &exchange.VenueConstraints{
+		Symbol:      symbol,
+		TickSize:    0.01,
+		LotSize:     0.00000001,
+		MinQty:      0.00000001,
+		MinNotional: 1.0,
+		PostOnly:    true,
+		ReduceOnly:  false,
+	}, nil
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 func mapCoinbaseStatus(s string) exchange.OrderStatus {

@@ -418,6 +418,20 @@ func (c *Client) GetTickerPrice(ctx context.Context, symbol string) (*exchange.T
 	}, nil
 }
 
+// ── Constraints ──────────────────────────────────────────────────────────────
+
+func (c *Client) GetConstraints(_ context.Context, symbol string) (*exchange.VenueConstraints, error) {
+	return &exchange.VenueConstraints{
+		Symbol:      symbol,
+		TickSize:    0.50,
+		LotSize:     0.001,
+		MinQty:      0.001,
+		MinNotional: 1.0,
+		PostOnly:    true,
+		ReduceOnly:  true,
+	}, nil
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 func mapDeribitOrderType(t exchange.OrderType) string {
