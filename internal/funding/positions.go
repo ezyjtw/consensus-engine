@@ -14,9 +14,7 @@ type PositionTracker struct {
 }
 
 type trackedPosition struct {
-	pos       OpenPosition
-	netBuyUSD float64 // cumulative buy notional
-	netSellUSD float64 // cumulative sell notional (exit legs)
+	pos OpenPosition
 }
 
 // NewPositionTracker creates an empty position tracker.
