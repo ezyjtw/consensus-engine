@@ -198,7 +198,7 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 
 			// Choose order type and price based on attempt number.
 			orderType := exchange.OrderTypeLimit
-			orderPrice := worstPrice
+			var orderPrice float64
 			if attempt < e.cfg.MaxRetriesPerLeg {
 				// Early attempts: use tighter limit price for maker rebate.
 				frac := float64(attempt+1) / float64(e.cfg.MaxRetriesPerLeg+1)
