@@ -1,0 +1,66 @@
+---
+# On-chain execution and market data configuration
+onchain:
+  wallet:
+    max_pending_txs: 10
+    gas_limit_default: 300000
+    max_gas_price_gwei: 100
+    confirm_timeout_s: 120
+
+  chains:
+    - chain_id: 1
+      name: ethereum
+      rpc_env: ETH_RPC_URL
+      eip1559: true
+      base_fee_gwei: 30
+    - chain_id: 42161
+      name: arbitrum
+      rpc_env: ARB_RPC_URL
+      eip1559: true
+      base_fee_gwei: 0.1
+    - chain_id: 8453
+      name: base
+      rpc_env: BASE_RPC_URL
+      eip1559: true
+      base_fee_gwei: 0.05
+    - chain_id: 10
+      name: optimism
+      rpc_env: OP_RPC_URL
+      eip1559: true
+      base_fee_gwei: 0.05
+
+  dex_indexer:
+    stale_ms: 30000               # pool state stale threshold
+    poll_interval_ms: 5000        # polling interval for pool updates
+    max_pools: 10000              # max pools to track
+
+  bridges:
+    - name: optimism
+      type: OPTIMISTIC
+      challenge_ms: 604800000     # 7 days
+      avg_finalize_ms: 605400000
+      max_amount_usd: 1000000
+      fee_rate_bps: 0
+    - name: arbitrum
+      type: OPTIMISTIC
+      challenge_ms: 604800000
+      avg_finalize_ms: 605400000
+      max_amount_usd: 1000000
+      fee_rate_bps: 0
+    - name: across
+      type: THIRD_PARTY
+      challenge_ms: 0
+      avg_finalize_ms: 120000     # ~2 minutes
+      max_amount_usd: 500000
+      fee_rate_bps: 5
+    - name: stargate
+      type: THIRD_PARTY
+      challenge_ms: 0
+      avg_finalize_ms: 60000      # ~1 minute
+      max_amount_usd: 200000
+      fee_rate_bps: 6
+
+redis:
+  addr: "localhost:6379"
+  consumer_group: "onchain"
+  consumer_name: "onchain-1"

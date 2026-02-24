@@ -1,0 +1,56 @@
+---
+# DeFi risk management configuration
+defi_risk:
+  depeg:
+    threshold_bps: 50             # alert when peg deviates by 50+ bps
+    window_ms: 300000             # 5 minute lookback
+    max_samples: 10000
+
+    targets:                      # pegged assets and their expected values
+      USDC: 1.0
+      USDT: 1.0
+      DAI: 1.0
+      FRAX: 1.0
+      crvUSD: 1.0
+
+  oracle:
+    max_deviation_bps: 100        # max deviation from reference price
+    max_stale_sec: 60             # max time since last oracle update
+    max_samples: 5000
+
+  protocol_profiles:
+    - protocol: aave-v3
+      audit_count: 4
+      tvl_millions: 10000
+      age_months: 30
+      incident_count: 0
+      is_upgradeable: true
+      has_timelock: true
+    - protocol: compound-v3
+      audit_count: 3
+      tvl_millions: 3000
+      age_months: 24
+      incident_count: 0
+      is_upgradeable: true
+      has_timelock: true
+    - protocol: maker
+      audit_count: 5
+      tvl_millions: 8000
+      age_months: 72
+      incident_count: 1
+      is_upgradeable: false
+      has_timelock: false
+    - protocol: uniswap-v3
+      audit_count: 3
+      tvl_millions: 5000
+      age_months: 36
+      incident_count: 0
+      is_upgradeable: false
+      has_timelock: false
+    - protocol: curve
+      audit_count: 2
+      tvl_millions: 2000
+      age_months: 48
+      incident_count: 1
+      is_upgradeable: true
+      has_timelock: true

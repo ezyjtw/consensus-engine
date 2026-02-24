@@ -1,0 +1,60 @@
+---
+# Regime detection and strategy adjustment
+regime:
+  window_ms: 300000             # 5 minute lookback
+
+  # Regime thresholds
+  volatility_ratio_volatile: 3.0   # vol / baseline for VOLATILE
+  volatility_ratio_trending: 1.5   # vol / baseline for TRENDING
+  spread_ratio_volatile: 2.5       # spread / baseline for VOLATILE
+  spread_ratio_cascade: 2.0        # spread / baseline for CASCADE
+  trend_strength_threshold: 0.6    # linear regression slope for TRENDING
+  liquidation_score_threshold: 0.7 # score threshold for CASCADE
+
+  # Strategy adjustments per regime
+  calm:
+    sizing_multiplier: 1.2
+    min_edge_multiplier: 0.8
+    max_position_mult: 1.2
+    passive_enabled: true
+    aggressiveness: 4
+  trending:
+    sizing_multiplier: 1.0
+    min_edge_multiplier: 1.0
+    max_position_mult: 1.0
+    passive_enabled: true
+    aggressiveness: 3
+  volatile:
+    sizing_multiplier: 0.5
+    min_edge_multiplier: 1.5
+    max_position_mult: 0.5
+    passive_enabled: false
+    aggressiveness: 2
+  liquidation_cascade:
+    sizing_multiplier: 0.25
+    min_edge_multiplier: 2.0
+    max_position_mult: 0.3
+    passive_enabled: false
+    aggressiveness: 1
+
+optimizer:
+  window_ms: 3600000            # 1 hour lookback for parameter optimisation
+  min_samples: 20               # minimum observations before tuning
+  step_decay: 0.999             # shrink step size over time
+
+  parameters:
+    - name: min_edge_bps
+      current: 3.0
+      min: 1.0
+      max: 10.0
+      step_size: 0.5
+    - name: max_position_usd
+      current: 25000
+      min: 5000
+      max: 100000
+      step_size: 2000
+    - name: cooldown_ms
+      current: 1000
+      min: 200
+      max: 5000
+      step_size: 100

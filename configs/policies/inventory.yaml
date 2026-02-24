@@ -1,0 +1,18 @@
+---
+# Cross-exchange inventory balancing and margin efficiency
+inventory:
+  target_alloc_pct:
+    binance: 40
+    okx: 25
+    bybit: 20
+    deribit: 15
+  rebalance_thresh_pct: 10      # trigger rebalance when off by 10%
+  min_transfer_usd: 100
+  max_transfer_usd: 50000
+  max_utilization_pct: 85       # urgent top-up above this
+  min_free_pct: 20              # minimum free margin %
+  transfer_time_sec:
+    binance-okx: 600
+    binance-bybit: 600
+    binance-deribit: 900
+    okx-bybit: 600
