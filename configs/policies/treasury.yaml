@@ -1,0 +1,47 @@
+# Treasury service configuration.
+# Manages deposit detection, fiat→USDC conversion, and multi-venue distribution.
+
+tenant_id: "default"
+
+# Primary venue where deposits land (must support fiat on-ramp).
+treasury_venue: "coinbase"
+
+# Poll interval for checking new deposits (seconds).
+poll_interval_sec: 30
+
+# Auto-convert fiat deposits to stablecoin.
+auto_convert: true
+convert_to: "USDC"
+
+# Minimum amount to trigger distribution to trading venues.
+min_distribute_usd: 50.0
+
+# Allocation weights for distributing funds to trading venues.
+# Weights should sum to 1.0. Network is the preferred withdrawal network.
+allocation:
+  - venue: binance
+    weight: 0.35
+    network: arbitrum
+  - venue: okx
+    weight: 0.30
+    network: arbitrum
+  - venue: bybit
+    weight: 0.25
+    network: arbitrum
+  - venue: deribit
+    weight: 0.10
+    network: ethereum
+
+# Profit sweep: periodically move excess funds from trading venues back to treasury.
+sweep_enabled: true
+sweep_interval_min: 60
+sweep_threshold_usd: 1000.0  # minimum free balance to keep on each venue
+
+# Reconciliation: periodic balance check across all venues.
+reconcile_interval_min: 15
+drift_alert_pct: 2.0  # alert when actual vs expected balance drifts above this %
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  use_tls: false

@@ -2,17 +2,33 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
+	"github.com/ezyjtw/consensus-engine/internal/arb"
 	"github.com/ezyjtw/consensus-engine/internal/eventbus"
+	"github.com/ezyjtw/consensus-engine/internal/exchange"
+	"github.com/ezyjtw/consensus-engine/internal/exchange/binance"
+	"github.com/ezyjtw/consensus-engine/internal/exchange/bybit"
+	"github.com/ezyjtw/consensus-engine/internal/exchange/coinbase"
+	"github.com/ezyjtw/consensus-engine/internal/exchange/deribit"
+	"github.com/ezyjtw/consensus-engine/internal/exchange/okx"
 	"github.com/ezyjtw/consensus-engine/internal/execution"
 	"github.com/ezyjtw/consensus-engine/internal/redact"
 )
+
+// executor is a common interface for paper and live executors.
+type executor interface {
+	Execute(ctx context.Context, intent arb.TradeIntent) ([]execution.ExecutionEvent, *execution.SimulatedFill)
+}
 
 func main() {
 	cfgPath := flag.String("config", "configs/execution_router.yaml",
@@ -55,7 +71,20 @@ func main() {
 	defer bus.Close() //nolint:errcheck
 
 	priceCache := execution.NewPriceCache()
-	executor := execution.NewPaperExecutor(cfg, priceCache)
+
+	// Select executor based on trading mode.
+	var exec executor
+	switch cfg.TradingMode {
+	case "LIVE":
+		registry, err := buildExchangeRegistry(cfg)
+		if err != nil {
+			log.Fatalf("failed to build exchange registry: %v", err)
+		}
+		exec = execution.NewLiveExecutor(cfg, priceCache, registry)
+		log.Printf("execution-router: LIVE executor active — real orders will be placed")
+	default:
+		exec = execution.NewPaperExecutor(cfg, priceCache)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
@@ -119,7 +148,7 @@ func main() {
 		}
 
 		for _, intent := range intents {
-			events, fill := executor.Execute(ctx, intent)
+			events, fill := exec.Execute(ctx, intent)
 			if fill != nil && fill.IntentExpired {
 				expired++
 				continue
@@ -143,4 +172,32 @@ func main() {
 				intent.IntentID, intent.Strategy, intent.Symbol, fill.NetPnLUSD)
 		}
 	}
+}
+
+// buildExchangeRegistry creates the exchange registry for LIVE mode.
+func buildExchangeRegistry(cfg *execution.Config) (*exchange.Registry, error) {
+	masterKeyHex := os.Getenv("DASHBOARD_MASTER_KEY")
+	if masterKeyHex == "" {
+		return nil, fmt.Errorf("DASHBOARD_MASTER_KEY required for LIVE mode")
+	}
+	masterKey, err := hex.DecodeString(masterKeyHex)
+	if err != nil || len(masterKey) != 32 {
+		return nil, fmt.Errorf("DASHBOARD_MASTER_KEY must be 64 hex chars (32 bytes)")
+	}
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+	})
+
+	credStore := exchange.NewCredentialStore(rdb, masterKey)
+	registry := exchange.NewRegistry(credStore)
+
+	registry.RegisterFactory("coinbase", coinbase.New)
+	registry.RegisterFactory("binance", binance.New)
+	registry.RegisterFactory("okx", okx.New)
+	registry.RegisterFactory("bybit", bybit.New)
+	registry.RegisterFactory("deribit", deribit.New)
+
+	return registry, nil
 }

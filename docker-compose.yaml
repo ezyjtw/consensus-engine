@@ -129,8 +129,24 @@ services:
     environment:
       <<: *common-env
       TRADING_MODE: "PAPER"  # override with SHADOW or LIVE
+      DASHBOARD_MASTER_KEY: "${DASHBOARD_MASTER_KEY}"
     volumes:
       - ./configs/execution_router.yaml:/configs/execution_router.yaml:ro
+
+  # ── Treasury ───────────────────────────────────────────────────────────
+  treasury:
+    build:
+      context: .
+      dockerfile: Dockerfile.treasury
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      DASHBOARD_MASTER_KEY: "${DASHBOARD_MASTER_KEY}"
+    volumes:
+      - ./configs/policies/treasury.yaml:/configs/policies/treasury.yaml:ro
 
   # ── Risk & safety ───────────────────────────────────────────────────────
   risk-daemon:
