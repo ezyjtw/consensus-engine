@@ -5,7 +5,7 @@ package dashboard
 // stream. This ensures the dashboard displays real-time prices even when the
 // dedicated market-data WebSocket service is not running.
 //
-// Supported venues: Binance Futures, OKX, Bybit.
+// Supported venues: Binance (spot), OKX, Bybit, Deribit.
 // All endpoints used are public (no API key required).
 
 import (
@@ -17,8 +17,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/ezyjtw/consensus-engine/internal/consensus"
+	"github.com/redis/go-redis/v9"
 )
 
 // PricePoller periodically fetches prices from public exchange APIs and
@@ -65,22 +65,42 @@ func (p *PricePoller) Run(ctx context.Context) {
 	}
 }
 
+// venueFetcher is a named fetch function for a single venue.
+type venueFetcher struct {
+	name  string
+	fetch func(context.Context) ([]consensus.Quote, error)
+}
+
 func (p *PricePoller) poll(ctx context.Context) {
-	// Fetch from all venues concurrently.
+	fetchers := []venueFetcher{
+		{"binance", p.fetchBinance},
+		{"okx", p.fetchOKX},
+		{"bybit", p.fetchBybit},
+		{"deribit", p.fetchDeribit},
+	}
+
 	type result struct {
+		name   string
 		quotes []consensus.Quote
 		err    error
 	}
 
-	ch := make(chan result, 3)
-	go func() { q, e := p.fetchBinance(ctx); ch <- result{q, e} }()
-	go func() { q, e := p.fetchOKX(ctx); ch <- result{q, e} }()
-	go func() { q, e := p.fetchBybit(ctx); ch <- result{q, e} }()
+	ch := make(chan result, len(fetchers))
+	for _, f := range fetchers {
+		f := f
+		go func() {
+			q, e := f.fetch(ctx)
+			ch <- result{f.name, q, e}
+		}()
+	}
 
 	published := 0
-	for i := 0; i < 3; i++ {
+	for i := 0; i < len(fetchers); i++ {
 		r := <-ch
 		if r.err != nil {
+			if ctx.Err() == nil {
+				log.Printf("price-poller: %s: %v", r.name, r.err)
+			}
 			continue
 		}
 		for _, q := range r.quotes {
@@ -103,65 +123,43 @@ func (p *PricePoller) publish(ctx context.Context, q consensus.Quote) error {
 	}
 	return p.rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: p.stream,
-		MaxLen: 5000, // cap stream size
+		MaxLen: 5000,
 		Approx: true,
 		Values: map[string]interface{}{"data": string(data)},
 	}).Err()
 }
 
-// ── Binance Futures ──────────────────────────────────────────────────────────
+// ── Binance (Spot API — more accessible from cloud IPs than Futures API) ─────
 
-// Symbols to track (exchange symbol → canonical symbol).
+// binanceSymbols maps exchange symbol → canonical symbol.
 var binanceSymbols = map[string]string{
 	"BTCUSDT": "BTC-PERP",
 	"ETHUSDT": "ETH-PERP",
+	"BNBUSDT": "BNB-PERP",
+	"SOLUSDT": "SOL-PERP",
+	"XRPUSDT": "XRP-PERP",
 }
 
-type binanceTicker struct {
+type binanceSpotTicker struct {
 	Symbol   string `json:"symbol"`
 	BidPrice string `json:"bidPrice"`
 	AskPrice string `json:"askPrice"`
 }
 
-type binancePremiumIndex struct {
-	Symbol          string `json:"symbol"`
-	MarkPrice       string `json:"markPrice"`
-	IndexPrice      string `json:"indexPrice"`
-	LastFundingRate string `json:"lastFundingRate"`
-}
-
 func (p *PricePoller) fetchBinance(ctx context.Context) ([]consensus.Quote, error) {
-	// Fetch book tickers.
-	tickers, err := httpGetJSON[[]binanceTicker](ctx, p.client,
-		"https://fapi.binance.com/fapi/v1/ticker/bookTicker")
+	// Use the spot API (api.binance.com) which is accessible from cloud IPs.
+	// The futures API (fapi.binance.com) blocks many cloud provider IPs.
+	tickers, err := httpGetJSON[[]binanceSpotTicker](ctx, p.client,
+		"https://api.binance.com/api/v3/ticker/bookTicker")
 	if err != nil {
 		return nil, fmt.Errorf("binance bookTicker: %w", err)
-	}
-	tickerMap := make(map[string]binanceTicker)
-	for _, t := range *tickers {
-		if _, ok := binanceSymbols[t.Symbol]; ok {
-			tickerMap[t.Symbol] = t
-		}
-	}
-
-	// Fetch mark/index/funding.
-	premiums, err := httpGetJSON[[]binancePremiumIndex](ctx, p.client,
-		"https://fapi.binance.com/fapi/v1/premiumIndex")
-	if err != nil {
-		return nil, fmt.Errorf("binance premiumIndex: %w", err)
-	}
-	premiumMap := make(map[string]binancePremiumIndex)
-	for _, pi := range *premiums {
-		if _, ok := binanceSymbols[pi.Symbol]; ok {
-			premiumMap[pi.Symbol] = pi
-		}
 	}
 
 	now := time.Now().UnixMilli()
 	var quotes []consensus.Quote
-	for exSym, canSym := range binanceSymbols {
-		t, tok := tickerMap[exSym]
-		if !tok {
+	for _, t := range *tickers {
+		canSym, ok := binanceSymbols[t.Symbol]
+		if !ok {
 			continue
 		}
 		bid, _ := strconv.ParseFloat(t.BidPrice, 64)
@@ -169,22 +167,20 @@ func (p *PricePoller) fetchBinance(ctx context.Context) ([]consensus.Quote, erro
 		if bid <= 0 || ask <= 0 {
 			continue
 		}
-		q := consensus.Quote{
+		quotes = append(quotes, consensus.Quote{
 			TenantID:    p.tenantID,
 			Venue:       "binance",
 			Symbol:      consensus.Symbol(canSym),
 			TsMs:        now,
 			BestBid:     bid,
 			BestAsk:     ask,
+			Mark:        (bid + ask) / 2,
 			FeeBpsTaker: 4.0,
 			FeedHealth:  consensus.FeedHealth{WsConnected: false, LastMsgTsMs: now},
-		}
-		if pi, ok := premiumMap[exSym]; ok {
-			q.Mark, _ = strconv.ParseFloat(pi.MarkPrice, 64)
-			q.Index, _ = strconv.ParseFloat(pi.IndexPrice, 64)
-			q.FundingRate, _ = strconv.ParseFloat(pi.LastFundingRate, 64)
-		}
-		quotes = append(quotes, q)
+		})
+	}
+	if len(quotes) == 0 {
+		return nil, fmt.Errorf("no matching symbols in response")
 	}
 	return quotes, nil
 }
@@ -194,28 +190,35 @@ func (p *PricePoller) fetchBinance(ctx context.Context) ([]consensus.Quote, erro
 var okxSymbols = map[string]string{
 	"BTC-USDT-SWAP": "BTC-PERP",
 	"ETH-USDT-SWAP": "ETH-PERP",
+	"SOL-USDT-SWAP": "SOL-PERP",
+	"XRP-USDT-SWAP": "XRP-PERP",
 }
 
 type okxTickerResp struct {
 	Data []struct {
-		InstID  string `json:"instId"`
-		BidPx   string `json:"bidPx"`
-		AskPx   string `json:"askPx"`
-		Last    string `json:"last"`
+		InstID      string `json:"instId"`
+		BidPx       string `json:"bidPx"`
+		AskPx       string `json:"askPx"`
+		Last        string `json:"last"`
 		FundingRate string `json:"fundingRate,omitempty"`
 	} `json:"data"`
 }
 
 func (p *PricePoller) fetchOKX(ctx context.Context) ([]consensus.Quote, error) {
+	// OKX supports fetching multiple tickers for a given instrument type.
+	resp, err := httpGetJSON[okxTickerResp](ctx, p.client,
+		"https://www.okx.com/api/v5/market/tickers?instType=SWAP")
+	if err != nil {
+		return nil, fmt.Errorf("okx tickers: %w", err)
+	}
+
 	now := time.Now().UnixMilli()
 	var quotes []consensus.Quote
-	for exSym, canSym := range okxSymbols {
-		url := "https://www.okx.com/api/v5/market/ticker?instId=" + exSym
-		resp, err := httpGetJSON[okxTickerResp](ctx, p.client, url)
-		if err != nil || len(resp.Data) == 0 {
+	for _, d := range resp.Data {
+		canSym, ok := okxSymbols[d.InstID]
+		if !ok {
 			continue
 		}
-		d := resp.Data[0]
 		bid, _ := strconv.ParseFloat(d.BidPx, 64)
 		ask, _ := strconv.ParseFloat(d.AskPx, 64)
 		if bid <= 0 || ask <= 0 {
@@ -242,10 +245,14 @@ func (p *PricePoller) fetchOKX(ctx context.Context) ([]consensus.Quote, error) {
 var bybitSymbols = map[string]string{
 	"BTCUSDT": "BTC-PERP",
 	"ETHUSDT": "ETH-PERP",
+	"BNBUSDT": "BNB-PERP",
+	"SOLUSDT": "SOL-PERP",
+	"XRPUSDT": "XRP-PERP",
 }
 
 type bybitTickerResp struct {
-	Result struct {
+	RetCode int `json:"retCode"`
+	Result  struct {
 		List []struct {
 			Symbol      string `json:"symbol"`
 			Bid1Price   string `json:"bid1Price"`
@@ -262,6 +269,9 @@ func (p *PricePoller) fetchBybit(ctx context.Context) ([]consensus.Quote, error)
 		"https://api.bybit.com/v5/market/tickers?category=linear")
 	if err != nil {
 		return nil, fmt.Errorf("bybit tickers: %w", err)
+	}
+	if resp.RetCode != 0 {
+		return nil, fmt.Errorf("bybit retCode=%d", resp.RetCode)
 	}
 
 	now := time.Now().UnixMilli()
@@ -290,6 +300,55 @@ func (p *PricePoller) fetchBybit(ctx context.Context) ([]consensus.Quote, error)
 		q.Index, _ = strconv.ParseFloat(t.IndexPrice, 64)
 		q.FundingRate, _ = strconv.ParseFloat(t.FundingRate, 64)
 		quotes = append(quotes, q)
+	}
+	return quotes, nil
+}
+
+// ── Deribit ──────────────────────────────────────────────────────────────────
+
+// Deribit only offers BTC and ETH perpetuals.
+var deribitSymbols = map[string]string{
+	"BTC-PERPETUAL": "BTC-PERP",
+	"ETH-PERPETUAL": "ETH-PERP",
+}
+
+type deribitTickerResp struct {
+	Result struct {
+		BestBidPrice float64 `json:"best_bid_price"`
+		BestAskPrice float64 `json:"best_ask_price"`
+		MarkPrice    float64 `json:"mark_price"`
+		IndexPrice   float64 `json:"index_price"`
+		FundingRate  float64 `json:"current_funding"`
+	} `json:"result"`
+}
+
+func (p *PricePoller) fetchDeribit(ctx context.Context) ([]consensus.Quote, error) {
+	now := time.Now().UnixMilli()
+	var quotes []consensus.Quote
+	for exSym, canSym := range deribitSymbols {
+		url := "https://www.deribit.com/api/v2/public/ticker?instrument_name=" + exSym
+		resp, err := httpGetJSON[deribitTickerResp](ctx, p.client, url)
+		if err != nil {
+			log.Printf("price-poller: deribit %s: %v", exSym, err)
+			continue
+		}
+		r := resp.Result
+		if r.BestBidPrice <= 0 || r.BestAskPrice <= 0 {
+			continue
+		}
+		quotes = append(quotes, consensus.Quote{
+			TenantID:    p.tenantID,
+			Venue:       "deribit",
+			Symbol:      consensus.Symbol(canSym),
+			TsMs:        now,
+			BestBid:     r.BestBidPrice,
+			BestAsk:     r.BestAskPrice,
+			Mark:        r.MarkPrice,
+			Index:       r.IndexPrice,
+			FundingRate: r.FundingRate,
+			FeeBpsTaker: 3.0,
+			FeedHealth:  consensus.FeedHealth{WsConnected: false, LastMsgTsMs: now},
+		})
 	}
 	return quotes, nil
 }
