@@ -45,6 +45,7 @@ func NewPublisher(cfg RedisConfig) (*Publisher, error) {
 
 // Publish serialises q and appends it to the market:quotes stream.
 func (p *Publisher) Publish(ctx context.Context, q consensus.Quote) error {
+	q.SchemaVersion = 1
 	data, err := json.Marshal(q)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)

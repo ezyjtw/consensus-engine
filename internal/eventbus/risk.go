@@ -100,6 +100,7 @@ func (b *RiskBus) ReadVenueStatusUpdates(ctx context.Context) ([]consensus.Venue
 
 // PublishState writes the risk state to both the Redis key and the state stream.
 func (b *RiskBus) PublishState(ctx context.Context, state risk.State) error {
+	state.SchemaVersion = 1
 	data, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -117,6 +118,7 @@ func (b *RiskBus) PublishState(ctx context.Context, state risk.State) error {
 
 // PublishAlert writes an alert to the alerts stream.
 func (b *RiskBus) PublishAlert(ctx context.Context, alert risk.Alert) error {
+	alert.SchemaVersion = 1
 	return b.sc.Publish(ctx, b.cfg.AlertsStream, alert)
 }
 

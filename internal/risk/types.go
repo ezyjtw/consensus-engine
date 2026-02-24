@@ -13,6 +13,7 @@ const (
 
 // State is the full risk snapshot published to Redis and the events stream.
 type State struct {
+	SchemaVersion    int      `json:"schema_version"`
 	TenantID         string   `json:"tenant_id"`
 	Mode             Mode     `json:"mode"`
 	TsMs             int64    `json:"ts_ms"`
@@ -44,7 +45,8 @@ type State struct {
 
 // Alert is published to risk:alerts when a threshold is breached.
 type Alert struct {
-	TenantID  string  `json:"tenant_id"`
+	SchemaVersion int     `json:"schema_version"`
+	TenantID      string  `json:"tenant_id"`
 	TsMs      int64   `json:"ts_ms"`
 	Source    string  `json:"source"`
 	Severity  string  `json:"severity"` // INFO | WARN | CRITICAL

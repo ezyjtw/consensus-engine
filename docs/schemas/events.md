@@ -1,7 +1,8 @@
 # Redis Stream Event Schemas
 
 > All events are published as JSON in the `data` field of Redis Stream entries.
-> Every event includes `tenant_id` for multi-tenant isolation.
+> Every event includes `schema_version` (int) and `tenant_id` for multi-tenant isolation.
+> Current schema version: **1**. Consumers should accept version 0 (legacy) or 1.
 
 ## Stream Map
 
@@ -45,6 +46,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "venue": "binance",
   "symbol": "BTC-PERP",
@@ -72,6 +74,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "symbol": "BTC-PERP",
   "ts_ms": 1700000000100,
@@ -105,6 +108,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "symbol": "BTC-PERP",
   "venue": "okx",
@@ -123,6 +127,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "venue": "okx",
   "symbol": "BTC-PERP",
@@ -137,6 +142,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "intent_id": "uuid-v4",
   "strategy": "CROSS_VENUE_ARB",
@@ -192,6 +198,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "event_type": "ORDER_FILLED",
   "intent_id": "uuid-v4",
   "leg_index": 0,
@@ -219,6 +226,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "intent_id": "uuid-v4",
   "strategy": "CROSS_VENUE_ARB",
   "symbol": "BTC-PERP",
@@ -258,6 +266,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "mode": "RUNNING",
   "ts_ms": 1700000000500,
@@ -281,6 +290,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "ts_ms": 1700000000600,
   "source": "risk-daemon",
@@ -298,6 +308,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "deposit_id": "dep-123",
   "source": "coinbase",
@@ -313,6 +324,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "deposit_id": "dep-123",
   "total_amount": 6500.0,
@@ -334,6 +346,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "from_venue": "binance",
   "to_venue": "coinbase",
@@ -349,6 +362,7 @@
 
 ```json
 {
+  "schema_version": 1,
   "tenant_id": "default",
   "ts_ms": 1700000001000,
   "total_usd": 50000.0,

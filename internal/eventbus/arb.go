@@ -185,6 +185,7 @@ func (b *ArbBus) ReadOIUpdates(ctx context.Context) ([]string, error) {
 
 // PublishTradeIntent appends a TradeIntent to the output intents stream.
 func (b *ArbBus) PublishTradeIntent(ctx context.Context, intent arb.TradeIntent) error {
+	intent.SchemaVersion = 1
 	data, err := json.Marshal(intent)
 	if err != nil {
 		return fmt.Errorf("marshalling intent: %w", err)

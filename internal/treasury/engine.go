@@ -124,7 +124,8 @@ func (e *Engine) processDeposit(ctx context.Context, deposit exchange.DepositRec
 
 	// Publish deposit event.
 	evt := DepositEvent{
-		TenantID:  e.cfg.TenantID,
+		SchemaVersion: 1,
+		TenantID:      e.cfg.TenantID,
 		DepositID: deposit.DepositID,
 		Source:    e.cfg.TreasuryVenue,
 		Asset:     deposit.Asset,
@@ -151,7 +152,8 @@ func (e *Engine) processDeposit(ctx context.Context, deposit exchange.DepositRec
 		targetAsset = converted.ToAsset
 
 		convEvt := ConversionEvent{
-			TenantID:   e.cfg.TenantID,
+			SchemaVersion: 1,
+			TenantID:      e.cfg.TenantID,
 			ConvertID:  converted.ConvertID,
 			FromAsset:  converted.FromAsset,
 			ToAsset:    converted.ToAsset,
@@ -302,7 +304,8 @@ func (e *Engine) distribute(ctx context.Context, depositID, asset string, totalA
 	}
 
 	distEvt := DistributionEvent{
-		TenantID:    e.cfg.TenantID,
+		SchemaVersion: 1,
+		TenantID:      e.cfg.TenantID,
 		DepositID:   depositID,
 		TotalAmount: totalAmount,
 		Legs:        legs,
@@ -419,7 +422,8 @@ func (e *Engine) executeSweep(ctx context.Context) {
 				sweepable, e.cfg.ConvertTo, alloc.Venue, e.cfg.TreasuryVenue, resp.WithdrawID)
 
 			sweepEvt := SweepEvent{
-				TenantID:   e.cfg.TenantID,
+				SchemaVersion: 1,
+				TenantID:      e.cfg.TenantID,
 				FromVenue:  alloc.Venue,
 				ToVenue:    e.cfg.TreasuryVenue,
 				Asset:      e.cfg.ConvertTo,
@@ -466,7 +470,8 @@ func (e *Engine) RunReconciliation(ctx context.Context) {
 func (e *Engine) reconcile(ctx context.Context) ReconciliationReport {
 	now := time.Now().UnixMilli()
 	report := ReconciliationReport{
-		TenantID: e.cfg.TenantID,
+		SchemaVersion: 1,
+		TenantID:      e.cfg.TenantID,
 		TsMs:     now,
 		Healthy:  true,
 	}

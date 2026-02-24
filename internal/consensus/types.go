@@ -22,7 +22,8 @@ type FeedHealth struct {
 }
 
 type Quote struct {
-	TenantID     string     `json:"tenant_id"`
+	SchemaVersion int        `json:"schema_version"`
+	TenantID      string     `json:"tenant_id"`
 	Venue        Venue      `json:"venue"`
 	Symbol       Symbol     `json:"symbol"`
 	TsMs         int64      `json:"ts_ms"`
@@ -71,6 +72,7 @@ type Consensus struct {
 }
 
 type ConsensusUpdate struct {
+	SchemaVersion   int            `json:"schema_version"`
 	TenantID        string         `json:"tenant_id"`
 	Symbol          Symbol         `json:"symbol"`
 	TsMs            int64          `json:"ts_ms"`
@@ -80,6 +82,7 @@ type ConsensusUpdate struct {
 }
 
 type VenueAnomaly struct {
+	SchemaVersion     int     `json:"schema_version"`
 	TenantID          string  `json:"tenant_id"`
 	Symbol            Symbol  `json:"symbol"`
 	Venue             Venue   `json:"venue"`
@@ -94,7 +97,8 @@ type VenueAnomaly struct {
 }
 
 type VenueStatusUpdate struct {
-	TenantID string     `json:"tenant_id"`
+	SchemaVersion int        `json:"schema_version"`
+	TenantID      string     `json:"tenant_id"`
 	Venue    Venue      `json:"venue"`
 	Symbol   Symbol     `json:"symbol"`
 	TsMs     int64      `json:"ts_ms"`
