@@ -67,6 +67,24 @@ type Converter interface {
 	GetConvertStatus(ctx context.Context, convertID string) (*ConvertResponse, error)
 }
 
+// Amender is an optional interface for exchanges that support in-place order
+// amendment (modify price/qty without cancel/replace). Binance, OKX, and Bybit
+// support this; Coinbase and Deribit do not.
+type Amender interface {
+	// AmendOrder modifies an existing open order in-place.
+	AmendOrder(ctx context.Context, req AmendOrderRequest) (*OrderResponse, error)
+}
+
+// ADLDetector is an optional interface for exchanges that expose auto-deleverage
+// event information. When a position is forcibly reduced by the exchange's ADL
+// mechanism, the adapter should detect this and report it.
+type ADLDetector interface {
+	// DetectADLEvents returns any ADL (auto-deleverage) events since the given
+	// timestamp. Each event includes the affected symbol, reduced quantity, and
+	// the price at which the reduction occurred.
+	DetectADLEvents(ctx context.Context, sinceMs int64) ([]ADLEvent, error)
+}
+
 // DepositWatcher is an optional interface for exchanges that support polling
 // for new fiat deposits (e.g. Coinbase).
 type DepositWatcher interface {

@@ -46,7 +46,14 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	// PnL
 	s.mux.HandleFunc("GET /api/pnl", s.auth(gw.handleGetPnL))
 	s.mux.HandleFunc("GET /api/pnl/attribution", s.auth(gw.handleGetPnLAttribution))
+	s.mux.HandleFunc("GET /api/pnl/by-venue", s.auth(gw.handleGetPnLByVenue))
+	s.mux.HandleFunc("GET /api/pnl/by-strategy", s.auth(gw.handleGetPnLByStrategy))
 	s.mux.HandleFunc("GET /api/metrics/kpi", s.auth(gw.handleGetKPI))
+
+	// Transfer approvals
+	s.mux.HandleFunc("GET /api/transfers/pending", s.authRole(auth.RoleTrader, gw.handleGetPendingTransfers))
+	s.mux.HandleFunc("POST /api/transfers/approve", s.authRole(auth.RoleTrader, gw.handleApproveTransfer))
+	s.mux.HandleFunc("POST /api/transfers/deny", s.authRole(auth.RoleTrader, gw.handleDenyTransfer))
 
 	// Positions (Redis-based paper positions)
 	s.mux.HandleFunc("GET /api/positions", s.auth(gw.handleGetPositions))
@@ -199,12 +206,27 @@ func (gw *Gateway) handleGetPnLAttribution(w http.ResponseWriter, r *http.Reques
 		jsonOK(w, []interface{}{})
 		return
 	}
-	rows, err := gw.db.PnLSummary(r.Context(), gw.tenantID)
-	if err != nil {
-		jsonErr(w, err.Error(), http.StatusInternalServerError)
+	byVenue, venueErr := gw.db.PnLAttributionByVenue(r.Context(), gw.tenantID)
+	byStrategy, stratErr := gw.db.PnLAttributionByStrategy(r.Context(), gw.tenantID)
+
+	// Fall back to basic PnL summary if attribution table is empty.
+	if venueErr != nil || stratErr != nil || (len(byVenue) == 0 && len(byStrategy) == 0) {
+		rows, err := gw.db.PnLSummary(r.Context(), gw.tenantID)
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]interface{}{
+			"by_strategy": rows,
+			"by_venue":    []interface{}{},
+			"note":        "detailed attribution pending — showing basic PnL summary",
+		})
 		return
 	}
-	jsonOK(w, rows)
+	jsonOK(w, map[string]interface{}{
+		"by_venue":    byVenue,
+		"by_strategy": byStrategy,
+	})
 }
 
 // ── Positions ─────────────────────────────────────────────────────────────
@@ -522,6 +544,59 @@ func (gw *Gateway) handleSetPaperMode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// ── Time-based guardrails ────────────────────────────────────
+		// Check minimum time in current mode before allowing upgrade.
+		minPaperDays := 7
+		minShadowDays := 14
+		modeStartKey := "trading:mode_started:" + gw.tenantID
+		modeStartStr := gw.rdb.Get(ctx, modeStartKey).Val()
+		if modeStartStr != "" {
+			if modeStart, parseErr := time.Parse(time.RFC3339, modeStartStr); parseErr == nil {
+				daysInMode := int(time.Since(modeStart).Hours() / 24)
+				if req.Mode == "SHADOW" && daysInMode < minPaperDays {
+					jsonErr(w, fmt.Sprintf(
+						"minimum %d days in PAPER required, only %d elapsed (use force=true to override)",
+						minPaperDays, daysInMode), http.StatusPreconditionFailed)
+					return
+				}
+				if req.Mode == "LIVE" && daysInMode < minShadowDays {
+					jsonErr(w, fmt.Sprintf(
+						"minimum %d days in SHADOW required, only %d elapsed (use force=true to override)",
+						minShadowDays, daysInMode), http.StatusPreconditionFailed)
+					return
+				}
+			}
+		}
+
+		// ── Performance guardrails for LIVE graduation ───────────────
+		if req.Mode == "LIVE" && gw.db != nil {
+			kpi, kpiErr := gw.db.KPISummary(ctx, gw.tenantID)
+			if kpiErr == nil {
+				sharpe, _ := kpi["sharpe_proxy"].(float64)
+				if sharpe < 0.5 {
+					jsonErr(w, fmt.Sprintf(
+						"Sharpe proxy %.2f below 0.50 minimum for LIVE (use force=true to override)",
+						sharpe), http.StatusPreconditionFailed)
+					return
+				}
+			}
+
+			// Check drawdown from risk state.
+			riskRaw := gw.rdb.Get(ctx, "risk:state:json").Val()
+			if riskRaw != "" {
+				var riskState map[string]interface{}
+				if json.Unmarshal([]byte(riskRaw), &riskState) == nil {
+					drawdown, _ := riskState["drawdown_pct"].(float64)
+					if drawdown > 5.0 {
+						jsonErr(w, fmt.Sprintf(
+							"current drawdown %.1f%% exceeds 5.0%% maximum for LIVE (use force=true to override)",
+							drawdown), http.StatusPreconditionFailed)
+						return
+					}
+				}
+			}
+		}
+
 		minFills := int64(50)
 		switch req.Mode {
 		case "SHADOW":
@@ -552,6 +627,9 @@ func (gw *Gateway) handleSetPaperMode(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	// Record mode transition timestamp for time-based guardrails.
+	gw.rdb.Set(ctx, "trading:mode_started:"+gw.tenantID, time.Now().Format(time.RFC3339), 0)
 
 	if err := gw.rdb.Set(ctx, "trading:mode", req.Mode, 0).Err(); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
@@ -1115,6 +1193,147 @@ func (gw *Gateway) handleGetStrategies(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	jsonOK(w, result)
+}
+
+// ── PnL attribution drill-down ──────────────────────────────────────────
+
+// handleGetPnLByVenue returns per-venue PnL with fee/funding/slippage separation.
+func (gw *Gateway) handleGetPnLByVenue(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonOK(w, []interface{}{})
+		return
+	}
+	rows, err := gw.db.PnLAttributionByVenue(r.Context(), gw.tenantID)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, rows)
+}
+
+// handleGetPnLByStrategy returns per-strategy PnL with fee/funding/slippage separation.
+func (gw *Gateway) handleGetPnLByStrategy(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		jsonOK(w, []interface{}{})
+		return
+	}
+	rows, err := gw.db.PnLAttributionByStrategy(r.Context(), gw.tenantID)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, rows)
+}
+
+// ── Transfer approval workflow ─────────────────────────────────────────
+
+// handleGetPendingTransfers returns all pending transfer proposals.
+func (gw *Gateway) handleGetPendingTransfers(w http.ResponseWriter, r *http.Request) {
+	raw := gw.rdb.Get(r.Context(), "transfer:pending:"+gw.tenantID).Val()
+	if raw == "" {
+		jsonOK(w, []interface{}{})
+		return
+	}
+	var pending []interface{}
+	if err := json.Unmarshal([]byte(raw), &pending); err != nil {
+		jsonOK(w, []interface{}{})
+		return
+	}
+	jsonOK(w, pending)
+}
+
+// handleApproveTransfer approves a pending transfer proposal.
+func (gw *Gateway) handleApproveTransfer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RequestID string `json:"request_id"`
+		Comment   string `json:"comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonErr(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.RequestID == "" {
+		jsonErr(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+
+	actor := "system"
+	if key := auth.FromContext(r.Context()); key != nil {
+		actor = key.Name
+	}
+
+	// Publish the approval event to the transfer-policy via Redis.
+	gw.rdb.XAdd(r.Context(), &redis.XAddArgs{
+		Stream: "transfer:approvals",
+		Values: map[string]interface{}{
+			"request_id": req.RequestID,
+			"approved_by": actor,
+			"comment":    req.Comment,
+			"tenant_id":  gw.tenantID,
+			"ts_ms":      time.Now().UnixMilli(),
+		},
+	})
+
+	// Audit log the approval.
+	if gw.db != nil {
+		if key := auth.FromContext(r.Context()); key != nil {
+			_ = gw.db.AuditLogRich(r.Context(), gw.tenantID, key.Name, string(key.Role),
+				auth.ClientIP(r), "transfer_approve",
+				map[string]string{"request_id": req.RequestID, "comment": req.Comment})
+		}
+	}
+
+	jsonOK(w, map[string]string{
+		"status":     "approved",
+		"request_id": req.RequestID,
+		"by":         actor,
+	})
+}
+
+// handleDenyTransfer denies a pending transfer proposal.
+func (gw *Gateway) handleDenyTransfer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RequestID string `json:"request_id"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonErr(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.RequestID == "" {
+		jsonErr(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+
+	actor := "system"
+	if key := auth.FromContext(r.Context()); key != nil {
+		actor = key.Name
+	}
+
+	gw.rdb.XAdd(r.Context(), &redis.XAddArgs{
+		Stream: "transfer:denials",
+		Values: map[string]interface{}{
+			"request_id": req.RequestID,
+			"denied_by":  actor,
+			"reason":     req.Reason,
+			"tenant_id":  gw.tenantID,
+			"ts_ms":      time.Now().UnixMilli(),
+		},
+	})
+
+	if gw.db != nil {
+		if key := auth.FromContext(r.Context()); key != nil {
+			_ = gw.db.AuditLogRich(r.Context(), gw.tenantID, key.Name, string(key.Role),
+				auth.ClientIP(r), "transfer_deny",
+				map[string]string{"request_id": req.RequestID, "reason": req.Reason})
+		}
+	}
+
+	jsonOK(w, map[string]string{
+		"status":     "denied",
+		"request_id": req.RequestID,
+		"by":         actor,
+	})
 }
 
 func clamp(v, lo, hi float64) float64 {

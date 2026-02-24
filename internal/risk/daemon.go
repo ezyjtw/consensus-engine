@@ -370,6 +370,25 @@ func (d *Daemon) evaluate() []Alert {
 		}
 	}
 
+	// Volatility spike playbook: rapid drawdown (> 2% in last 5 min) indicates
+	// abnormal market conditions. Enter SAFE mode and alert operator.
+	if d.state.DrawdownPct > d.policy.MaxDrawdownPct*0.75 && d.state.DrawdownPct < d.policy.MaxDrawdownPct {
+		d.activatePlaybook(IncidentPlaybook{
+			Name:     PlaybookVolatilitySpike,
+			TsMs:     now,
+			TenantID: d.policy.TenantID,
+			Trigger:  fmt.Sprintf("drawdown %.1f%% approaching max %.1f%%", d.state.DrawdownPct, d.policy.MaxDrawdownPct),
+			Actions: []string{
+				"Enter SAFE mode — reduce-only hedging",
+				"Widen slippage tolerance",
+				"Reduce position sizing",
+				"Alert operator for manual review",
+			},
+			TargetMode:    ModeSafe,
+			AutoResolveMs: 600_000, // 10 minutes
+		})
+	}
+
 	return alerts
 }
 

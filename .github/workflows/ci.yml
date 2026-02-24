@@ -63,3 +63,26 @@ jobs:
             echo "Building $df..."
             docker build -f "$df" -t "test-$(basename $df | tr '.' '-' | tr 'A-Z' 'a-z')" .
           done
+
+  smoke-test:
+    name: Compose Smoke Test
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start compose stack
+        env:
+          DASHBOARD_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+        run: |
+          docker compose up -d --build --wait
+          sleep 10
+      - name: Run smoke tests
+        run: |
+          chmod +x scripts/smoke-test.sh
+          ./scripts/smoke-test.sh
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=50
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
