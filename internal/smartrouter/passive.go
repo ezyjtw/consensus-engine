@@ -98,9 +98,8 @@ func (pe *PassiveEngine) FindOpportunities(symbol string, depths map[string]Venu
 		}
 
 		// Determine which side to provide based on flow
-		side := "BUY"
-		price := d.BestBid
-		depthUSD := d.BidDepthUSD
+		var side string
+		var price, depthUSD float64
 		if flowScore > 0.3 {
 			// Strong buy flow: provide on ask side (sell)
 			side = "SELL"

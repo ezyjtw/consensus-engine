@@ -64,7 +64,6 @@ type Monitor struct {
 	mu        sync.RWMutex
 	transfers map[string]*BridgeTransfer // id → transfer
 	configs   map[string]*BridgeConfig   // bridge name → config
-	stats     MonitorStats
 }
 
 // MonitorStats tracks bridge monitoring statistics.
