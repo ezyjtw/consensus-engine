@@ -35,6 +35,10 @@ type IntentConstraints struct {
 	MaxAgeMs        int64  `json:"max_age_ms"`
 	HedgePreference string `json:"hedge_preference"`
 	CooldownKey     string `json:"cooldown_key"`
+	// ForcePaperMode tells the execution router to simulate this intent
+	// even when running in LIVE mode. Used by staged funding rollout
+	// (PAPER stage) to track theoretical P&L before committing capital.
+	ForcePaperMode bool `json:"force_paper_mode,omitempty"`
 }
 
 // IntentDebug holds values useful for diagnosing why an intent was emitted.
