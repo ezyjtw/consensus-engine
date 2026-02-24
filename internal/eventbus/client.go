@@ -104,6 +104,16 @@ func (c *StreamClient) KillSwitchActive(ctx context.Context) bool {
 	return v > 0
 }
 
+// SystemMode returns the current risk daemon mode (RUNNING, PAUSED, SAFE, FLATTEN, HALTED).
+// Returns "RUNNING" if the key is absent.
+func (c *StreamClient) SystemMode(ctx context.Context) string {
+	mode := c.GetString(ctx, "risk:mode")
+	if mode == "" {
+		return "RUNNING"
+	}
+	return mode
+}
+
 // GetString fetches a Redis string key. Returns "" if not found.
 func (c *StreamClient) GetString(ctx context.Context, key string) string {
 	v, _ := c.rdb.Get(ctx, key).Result()

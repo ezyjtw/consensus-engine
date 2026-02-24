@@ -110,8 +110,12 @@ func main() {
 		default:
 		}
 
-		// Check kill switch.
+		// Check kill switch and system mode.
 		if sc.KillSwitchActive(ctx) {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if mode := sc.SystemMode(ctx); mode != "RUNNING" {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}

@@ -204,6 +204,15 @@ func (b *ArbBus) KillSwitchActive(ctx context.Context) bool {
 	return val > 0
 }
 
+// SystemMode returns the current risk daemon mode.
+func (b *ArbBus) SystemMode(ctx context.Context) string {
+	mode, _ := b.rdb.Get(ctx, "risk:mode").Result()
+	if mode == "" {
+		return "RUNNING"
+	}
+	return mode
+}
+
 // Close releases the underlying Redis connection.
 func (b *ArbBus) Close() error {
 	return b.rdb.Close()

@@ -181,6 +181,16 @@ func (b *Bus) KillSwitchActive(ctx context.Context) bool {
 	return val > 0
 }
 
+// SystemMode returns the current risk daemon mode (RUNNING, PAUSED, SAFE, FLATTEN, HALTED).
+// Returns "RUNNING" if the key is absent.
+func (b *Bus) SystemMode(ctx context.Context) string {
+	mode, _ := b.rdb.Get(ctx, "risk:mode").Result()
+	if mode == "" {
+		return "RUNNING"
+	}
+	return mode
+}
+
 func (b *Bus) Close() error {
 	return b.rdb.Close()
 }
