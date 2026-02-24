@@ -19,7 +19,7 @@ import (
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if s.gw == nil {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		fmt.Fprintln(w, "# gateway not initialised")
+		_, _ = fmt.Fprintln(w, "# gateway not initialised")
 		return
 	}
 

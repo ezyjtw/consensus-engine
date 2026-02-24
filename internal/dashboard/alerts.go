@@ -196,7 +196,7 @@ func (w *AlertWorker) fire(ctx context.Context, url string, p WebhookPayload) {
 		log.Printf("webhook: delivery failed: %v", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	log.Printf("webhook: %s → HTTP %d", p.Event, resp.StatusCode)
 }
 
@@ -224,7 +224,7 @@ func (w *AlertWorker) TestWebhook(ctx context.Context, webhookURL string) error 
 	if err != nil {
 		return fmt.Errorf("webhook request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("webhook returned HTTP %d", resp.StatusCode)
 	}

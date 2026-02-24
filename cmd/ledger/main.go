@@ -58,7 +58,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("ledger: redis connect: %v", err)
 	}
-	defer sc.Close()
+	defer sc.Close() //nolint:errcheck
 
 	group := "ledger"
 	streams := []string{

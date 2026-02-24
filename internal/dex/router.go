@@ -87,7 +87,7 @@ func (r *Router) oneInchQuote(ctx context.Context, req QuoteRequest) (*QuoteResp
 	if err != nil {
 		return nil, fmt.Errorf("1inch quote: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("1inch quote: HTTP %d", resp.StatusCode)
 	}
@@ -138,7 +138,7 @@ func (r *Router) paraswapQuote(ctx context.Context, req QuoteRequest) (*QuoteRes
 	if err != nil {
 		return nil, fmt.Errorf("paraswap quote: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("paraswap quote: HTTP %d", resp.StatusCode)
 	}

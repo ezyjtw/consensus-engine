@@ -109,12 +109,12 @@ func (a *BinanceAdapter) connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	// Close conn when ctx is cancelled so ReadMessage unblocks.
 	go func() {
 		<-ctx.Done()
-		conn.Close()
+		_ = conn.Close()
 	}()
 
 	// Build per-canonical-symbol state.
