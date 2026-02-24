@@ -29,6 +29,13 @@ type Policy struct {
 	// simple proportional scale against the strategy cap.
 	KellyFraction float64 `yaml:"kelly_fraction"`
 
+	// InitialCapitalUSD is the paper-mode starting balance.
+	// When > 0, the allocator enforces a capital gate: intents are rejected
+	// when total deployed notional would exceed current equity
+	// (InitialCapitalUSD + cumulative P&L).
+	// 0 = unlimited capital (legacy behaviour).
+	InitialCapitalUSD float64 `yaml:"initial_capital_usd"`
+
 	// BaselineOI is the reference open interest (contracts) for OI-gated sizing.
 	// When current OI falls below this, position sizes are reduced.
 	// 0 = OI gating disabled.

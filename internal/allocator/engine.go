@@ -29,15 +29,27 @@ type Engine struct {
 	// Optional: OI-gated position sizing and dynamic allocation.
 	OITracker  *OITracker
 	DynAlloc   *DynamicAllocator
+
+	// Capital tracking — paper mode starting balance.
+	initialCapital float64
+	cumulativePnL  float64
+	totalFees      float64
+	fillCount      int
+	peakEquity     float64 // high-water mark for drawdown calculation
 }
 
 func NewEngine(p *Policy) *Engine {
-	return &Engine{
+	e := &Engine{
 		policy:           p,
 		strategyDeployed: make(map[string]float64),
 		venueDeployed:    make(map[string]float64),
 		Rejected:         make(map[string]int),
+		initialCapital:   p.InitialCapitalUSD,
 	}
+	if e.initialCapital > 0 {
+		e.peakEquity = e.initialCapital
+	}
+	return e
 }
 
 // Evaluate decides whether to approve an intent and returns the (possibly
@@ -112,6 +124,22 @@ func (e *Engine) Evaluate(intent arb.TradeIntent, systemMode, consensusQuality s
 		}
 	}
 
+	// Gate 5b: capital pool gate — when paper capital is configured, ensure
+	// the total deployed notional plus this intent does not exceed equity.
+	if e.initialCapital > 0 {
+		equity := e.initialCapital + e.cumulativePnL
+		totalDeployed := e.totalDeployed()
+		availCap := equity - totalDeployed
+		if availCap <= 0 {
+			return e.reject(intent, "capital_exhausted")
+		}
+		if intentNotional > availCap {
+			// Will be scaled down below.
+			log.Printf("allocator: capital gate: equity=$%.0f deployed=$%.0f avail=$%.0f intent=$%.0f",
+				equity, totalDeployed, availCap, intentNotional)
+		}
+	}
+
 	// Scale down notional to fit within the tightest available cap.
 	scaleFactor := 1.0
 	if intentNotional > available {
@@ -122,6 +150,18 @@ func (e *Engine) Evaluate(intent arb.TradeIntent, systemMode, consensusQuality s
 		avail := venueCap - e.venueDeployed[leg.Venue]
 		if leg.NotionalUSD*scaleFactor > avail {
 			sf := avail / leg.NotionalUSD
+			if sf < scaleFactor {
+				scaleFactor = sf
+			}
+		}
+	}
+
+	// Apply capital pool constraint to scale factor.
+	if e.initialCapital > 0 {
+		equity := e.initialCapital + e.cumulativePnL
+		availCap := equity - e.totalDeployed()
+		if intentNotional*scaleFactor > availCap {
+			sf := availCap / intentNotional
 			if sf < scaleFactor {
 				scaleFactor = sf
 			}
@@ -224,5 +264,83 @@ func qualityRank(q string) int {
 		return 1
 	default:
 		return 0
+	}
+}
+
+// ── Capital tracking ─────────────────────────────────────────────────────
+
+// totalDeployed returns the sum of all currently deployed notional.
+func (e *Engine) totalDeployed() float64 {
+	var sum float64
+	for _, v := range e.strategyDeployed {
+		sum += v
+	}
+	return sum
+}
+
+// RecordPnL updates the cumulative P&L and high-water mark.
+// Called when fills are received. Must be called under e.mu.
+func (e *Engine) RecordPnL(pnl, fees float64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cumulativePnL += pnl
+	e.totalFees += fees
+	e.fillCount++
+	equity := e.initialCapital + e.cumulativePnL
+	if equity > e.peakEquity {
+		e.peakEquity = equity
+	}
+}
+
+// EquitySnapshot returns the current capital state.
+type EquitySnapshot struct {
+	InitialCapitalUSD float64 `json:"initial_capital_usd"`
+	CumulativePnLUSD  float64 `json:"cumulative_pnl_usd"`
+	CurrentEquityUSD  float64 `json:"current_equity_usd"`
+	DeployedUSD       float64 `json:"deployed_usd"`
+	AvailableUSD      float64 `json:"available_usd"`
+	TotalFeesUSD      float64 `json:"total_fees_usd"`
+	FillCount         int     `json:"fill_count"`
+	ReturnPct         float64 `json:"return_pct"`
+	DrawdownPct       float64 `json:"drawdown_pct"`
+	PeakEquityUSD     float64 `json:"peak_equity_usd"`
+}
+
+// Equity returns a snapshot of the current capital state.
+func (e *Engine) Equity() EquitySnapshot {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	equity := e.initialCapital + e.cumulativePnL
+	deployed := e.totalDeployed()
+	available := equity - deployed
+	if available < 0 {
+		available = 0
+	}
+
+	returnPct := 0.0
+	if e.initialCapital > 0 {
+		returnPct = (e.cumulativePnL / e.initialCapital) * 100
+	}
+
+	drawdownPct := 0.0
+	if e.peakEquity > 0 {
+		drawdownPct = ((e.peakEquity - equity) / e.peakEquity) * 100
+		if drawdownPct < 0 {
+			drawdownPct = 0
+		}
+	}
+
+	return EquitySnapshot{
+		InitialCapitalUSD: e.initialCapital,
+		CumulativePnLUSD:  e.cumulativePnL,
+		CurrentEquityUSD:  equity,
+		DeployedUSD:       deployed,
+		AvailableUSD:      available,
+		TotalFeesUSD:      e.totalFees,
+		FillCount:         e.fillCount,
+		ReturnPct:         returnPct,
+		DrawdownPct:       drawdownPct,
+		PeakEquityUSD:     e.peakEquity,
 	}
 }

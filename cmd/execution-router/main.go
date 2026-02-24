@@ -86,7 +86,9 @@ func main() {
 		log.Printf("execution-router: micro-live caps: order=$%.0f daily=$%.0f",
 			cfg.LiveMaxOrderNotionalUSD, cfg.LiveMaxDailyNotionalUSD)
 	default:
-		exec = execution.NewPaperExecutor(cfg, priceCache)
+		pe := execution.NewPaperExecutor(cfg, priceCache)
+		pe.SetPositionWriter(bus)
+		exec = pe
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(),

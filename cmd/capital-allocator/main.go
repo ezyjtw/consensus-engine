@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"log"
 	"os"
@@ -31,6 +32,9 @@ func main() {
 		keys(policy.PerStrategyMaxUSD), keys(policy.PerVenueMaxUSD))
 
 	engine := allocator.NewEngine(policy)
+	if policy.InitialCapitalUSD > 0 {
+		log.Printf("capital-allocator: paper capital pool=$%.0f", policy.InitialCapitalUSD)
+	}
 
 	// ── OI-gated position sizing ─────────────────────────────────────────
 	oiTracker := allocator.NewOITracker()
@@ -110,6 +114,12 @@ func main() {
 		case <-statsTicker.C:
 			log.Printf("capital-allocator: approved=%d rejected=%v",
 				engine.Approved, engine.Rejected)
+			if policy.InitialCapitalUSD > 0 {
+				snap := engine.Equity()
+				log.Printf("capital-allocator: equity=$%.0f pnl=$%.0f deployed=$%.0f return=%.2f%% drawdown=%.2f%%",
+					snap.CurrentEquityUSD, snap.CumulativePnLUSD, snap.DeployedUSD,
+					snap.ReturnPct, snap.DrawdownPct)
+			}
 			// Log OI summary.
 			oiTracker.LogSummary()
 			// Log dynamic allocator snapshot.
@@ -152,6 +162,16 @@ func main() {
 			}
 			// Feed the dynamic allocator with P&L data.
 			dynAlloc.RecordFill(f.Strategy, f.NetPnLUSD)
+			// Update capital pool equity tracking.
+			engine.RecordPnL(f.NetPnLUSD, f.FeesAssumedUSD)
+		}
+
+		// Publish equity state to Redis for the dashboard.
+		if policy.InitialCapitalUSD > 0 && len(fills) > 0 {
+			snap := engine.Equity()
+			if snapJSON, err := json.Marshal(snap); err == nil {
+				bus.PublishEquity(ctx, policy.Redis.Addr, string(snapJSON))
+			}
 		}
 
 		// ── Evaluate new intents ──────────────────────────────────────────

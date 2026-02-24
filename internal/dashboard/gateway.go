@@ -75,6 +75,7 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	// Paper trading mode
 	s.mux.HandleFunc("GET /api/paper/mode", s.auth(gw.handleGetPaperMode))
 	s.mux.HandleFunc("PUT /api/paper/mode", s.authRole(auth.RoleTrader, gw.handleSetPaperMode))
+	s.mux.HandleFunc("GET /api/paper/equity", s.auth(gw.handlePaperEquity))
 
 	// ── V3: Identity ──────────────────────────────────────────────────────
 	s.mux.HandleFunc("GET /api/auth/me", s.auth(gw.handleAuthMe))
@@ -544,6 +545,25 @@ func (gw *Gateway) handleGetPaperMode(w http.ResponseWriter, r *http.Request) {
 		mode = "PAPER"
 	}
 	jsonOK(w, map[string]string{"mode": mode})
+}
+
+// handlePaperEquity returns the current paper trading equity state.
+// The allocator publishes this to the "paper:equity" Redis key.
+func (gw *Gateway) handlePaperEquity(w http.ResponseWriter, r *http.Request) {
+	raw := gw.rdb.Get(r.Context(), "paper:equity").Val()
+	if raw == "" {
+		jsonOK(w, map[string]interface{}{
+			"initial_capital_usd": 0,
+			"note":                "no equity data — capital allocator may not be running or initial_capital_usd is not configured",
+		})
+		return
+	}
+	var snap map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &snap); err != nil {
+		jsonErr(w, "malformed equity data", http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, snap)
 }
 
 func (gw *Gateway) handleSetPaperMode(w http.ResponseWriter, r *http.Request) {

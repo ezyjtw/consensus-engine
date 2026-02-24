@@ -1,3 +1,8 @@
+# Paper mode starting capital. When > 0, the allocator enforces a capital gate:
+# intents are rejected when deployed notional would exceed current equity.
+# Set to 0 for unlimited capital (legacy behaviour).
+initial_capital_usd: 100000
+
 per_strategy_max_usd:
   CROSS_VENUE_ARB: 100000
   FUNDING_CARRY: 200000
