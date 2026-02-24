@@ -48,6 +48,7 @@ type ArbRedisPolicy struct {
 	UseTLS             bool   `yaml:"use_tls"`
 	InputStream        string `yaml:"input_stream"`
 	MarketQuotesStream string `yaml:"market_quotes_stream"`
+	OIStream           string `yaml:"oi_stream"`
 	OutputIntents      string `yaml:"output_intents"`
 	ConsumerGroup      string `yaml:"consumer_group"`
 	ConsumerName       string `yaml:"consumer_name"`

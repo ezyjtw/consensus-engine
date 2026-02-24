@@ -107,7 +107,7 @@ done
 # ── 5. Strategy engines: arb + funding intents ─────────────────────────────
 echo ""
 echo "4. Strategy engines"
-for STREAM in "trade:intents:pending" "trade:intents:approved"; do
+for STREAM in "trade:intents" "trade:intents:approved"; do
   LEN=$(rcli XLEN "$STREAM" 2>/dev/null || echo 0)
   if [[ "$LEN" -gt 0 ]]; then
     ok "$STREAM has $LEN messages"
@@ -143,7 +143,7 @@ KILL=$(rcli EXISTS "kill:switch" 2>/dev/null || echo 0)
 # ── 8. Ledger consumer group lag ──────────────────────────────────────────
 echo ""
 echo "7. Ledger consumer group lag"
-for STREAM in "execution:events" "demo:fills" "risk:alerts" "risk:state" "venue_status_updates"; do
+for STREAM in "execution:events" "demo:fills" "risk:alerts" "risk:state" "consensus:status"; do
   RAW=$(rcli XINFO GROUPS "$STREAM" 2>/dev/null || true)
   if [[ -z "$RAW" ]]; then
     info "$STREAM — no consumer groups yet"

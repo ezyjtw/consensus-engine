@@ -123,6 +123,7 @@ redis:
   use_tls: false
   input_stream: "consensus:updates"
   market_quotes_stream: "market:quotes"
+  oi_stream: "market:open_interest"
   output_intents: "trade:intents"
   consumer_group: "arb-engine"
   consumer_name: "worker-1"

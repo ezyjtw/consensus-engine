@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"log"
 	"os"
@@ -64,6 +65,7 @@ func main() {
 		UseTLS:             policy.Redis.UseTLS,
 		InputStream:        policy.Redis.InputStream,
 		MarketQuotesStream: policy.Redis.MarketQuotesStream,
+		OIStream:           policy.Redis.OIStream,
 		OutputIntents:      policy.Redis.OutputIntents,
 		ConsumerGroup:      policy.Redis.ConsumerGroup,
 		ConsumerName:       policy.Redis.ConsumerName,
@@ -139,6 +141,40 @@ func main() {
 		cascadeCooldown = arb.NewCooldown(cascadeCfg.CooldownMs)
 		log.Printf("cascade-detector: enabled oi_drop=%.1f%% price_move=%.1fbps window=%dms",
 			cascadeCfg.OIDropPct, cascadeCfg.PriceMoveBps, cascadeCfg.WindowMs)
+
+		// Background goroutine: drain market:open_interest and feed cascade OI tracker.
+		if policy.Redis.OIStream != "" {
+			log.Printf("cascade-detector: OI stream=%s", policy.Redis.OIStream)
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+					raws, err := bus.ReadOIUpdates(ctx)
+					if err != nil {
+						if ctx.Err() != nil {
+							return
+						}
+						log.Printf("cascade: OI read error: %v", err)
+						time.Sleep(100 * time.Millisecond)
+						continue
+					}
+					for _, raw := range raws {
+						var snap struct {
+							Venue       string  `json:"venue"`
+							Symbol      string  `json:"symbol"`
+							OiContracts float64 `json:"oi_contracts"`
+						}
+						if err := json.Unmarshal([]byte(raw), &snap); err != nil || snap.OiContracts <= 0 {
+							continue
+						}
+						cascadeDetector.UpdateOI(snap.Venue, snap.Symbol, snap.OiContracts)
+					}
+				}
+			}()
+		}
 	} else {
 		log.Println("cascade-detector: disabled")
 	}

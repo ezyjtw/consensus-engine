@@ -146,6 +146,33 @@ services:
     volumes:
       - ./configs/policies/risk.yaml:/configs/policies/risk.yaml:ro
 
+  # ── Liquidity & transfers ──────────────────────────────────────────────
+  liquidity-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.liquidity-engine
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+    volumes:
+      - ./configs/policies/liquidity_engine.yaml:/configs/policies/liquidity_engine.yaml:ro
+
+  transfer-policy:
+    build:
+      context: .
+      dockerfile: Dockerfile.transfer-policy
+    <<: *restart
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+    volumes:
+      - ./configs/policies/transfer_policy.yaml:/configs/policies/transfer_policy.yaml:ro
+
   # ── Ledger ──────────────────────────────────────────────────────────────
   ledger:
     build:

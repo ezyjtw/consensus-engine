@@ -30,7 +30,7 @@ redis:
   password: ""
   use_tls: false
   events_stream: "execution:events"
-  status_stream: "venue_status_updates"
+  status_stream: "consensus:status"
   alerts_stream: "risk:alerts"
   state_stream: "risk:state"
   consumer_group: "risk-daemon"
