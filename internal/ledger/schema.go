@@ -39,6 +39,23 @@ CREATE TABLE IF NOT EXISTS fills (
     ts              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- PnL attribution: per-venue, fee/funding/slippage separated breakdown.
+CREATE TABLE IF NOT EXISTS pnl_attribution (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       TEXT NOT NULL,
+    intent_id       UUID NOT NULL,
+    strategy        TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    venue           TEXT NOT NULL,
+    action          TEXT NOT NULL,        -- BUY | SELL
+    gross_pnl_usd   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    fee_usd          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    slippage_usd     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    funding_usd      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    net_pnl_usd      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ts              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS positions_snapshots (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       TEXT NOT NULL,
@@ -133,4 +150,10 @@ CREATE INDEX IF NOT EXISTS idx_risk_snapshots_ts    ON risk_state_snapshots (ten
 CREATE INDEX IF NOT EXISTS idx_positions_venue      ON positions_snapshots (tenant_id, venue, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_api_keys_tenant      ON api_keys (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_tenant_ts  ON audit_log (tenant_id, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_pnl_attr_tenant      ON pnl_attribution (tenant_id, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_pnl_attr_venue        ON pnl_attribution (tenant_id, venue, ts DESC);
+
+-- Add venue column to fills for per-venue PnL queries (backward compatible).
+ALTER TABLE fills ADD COLUMN IF NOT EXISTS venue TEXT DEFAULT '';
+ALTER TABLE fills ADD COLUMN IF NOT EXISTS funding_usd DOUBLE PRECISION DEFAULT 0;
 `

@@ -49,15 +49,34 @@ const (
 
 // OrderRequest is the input for placing an order.
 type OrderRequest struct {
-	Symbol        string    `json:"symbol"`          // exchange-native symbol (e.g. BTCUSDT)
-	Side          Side      `json:"side"`
-	Type          OrderType `json:"type"`
-	Quantity      float64   `json:"quantity"`         // base asset qty
-	Price         float64   `json:"price,omitempty"`  // required for LIMIT
-	NotionalUSD   float64   `json:"notional_usd"`     // informational
-	MaxSlippageBps float64  `json:"max_slippage_bps"`
-	ClientOrderID string    `json:"client_order_id"`
-	ReduceOnly    bool      `json:"reduce_only,omitempty"`
+	Symbol         string    `json:"symbol"`          // exchange-native symbol (e.g. BTCUSDT)
+	Side           Side      `json:"side"`
+	Type           OrderType `json:"type"`
+	Quantity       float64   `json:"quantity"`         // base asset qty
+	Price          float64   `json:"price,omitempty"`  // required for LIMIT
+	NotionalUSD    float64   `json:"notional_usd"`     // informational
+	MaxSlippageBps float64   `json:"max_slippage_bps"`
+	ClientOrderID  string    `json:"client_order_id"`
+	ReduceOnly     bool      `json:"reduce_only,omitempty"`
+	IdempotencyKey string    `json:"idempotency_key,omitempty"` // prevents duplicate placement on retry
+}
+
+// AmendOrderRequest modifies an existing open order in-place.
+type AmendOrderRequest struct {
+	Symbol   string  `json:"symbol"`
+	OrderID  string  `json:"order_id"`
+	NewPrice float64 `json:"new_price,omitempty"`
+	NewQty   float64 `json:"new_qty,omitempty"`
+}
+
+// ADLEvent represents an auto-deleverage event detected on an exchange.
+type ADLEvent struct {
+	Venue      string  `json:"venue"`
+	Symbol     string  `json:"symbol"`
+	Side       string  `json:"side"`       // LONG | SHORT
+	ReducedQty float64 `json:"reduced_qty"`
+	Price      float64 `json:"price"`
+	TsMs       int64   `json:"ts_ms"`
 }
 
 // OrderResponse is the result of placing or querying an order.

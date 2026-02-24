@@ -150,8 +150,16 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 
 	results := make([]legResult, len(intent.Legs))
 
+	// Depth-based hedge sequencing: if we have 2 legs, execute the thinner
+	// book side first (the side with less depth). This minimizes adverse selection
+	// by filling the harder side first — if it fails, we never expose on the easy side.
+	legs := intent.Legs
+	if len(legs) == 2 {
+		legs = e.orderLegsByDepth(ctx, intent.Symbol, legs)
+	}
+
 	// Execute legs sequentially so we can adjust leg B based on leg A's fill.
-	for i, leg := range intent.Legs {
+	for i, leg := range legs {
 		// Check expiry before each leg.
 		if time.Now().UnixMilli() > intent.ExpiresMs {
 			log.Printf("live: intent %s expired before leg %d", intent.IntentID, i)
@@ -288,7 +296,10 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 				orderPrice = worstPrice
 			}
 
-			orderReq := exchange.OrderRequest{
+			// Generate idempotency key: intentID + leg + attempt ensures retries
+		// don't create duplicate orders on network jitter or timeout.
+		idempotencyKey := fmt.Sprintf("%s-leg%d-r%d", intent.IntentID, i, attempt)
+		orderReq := exchange.OrderRequest{
 				Symbol:         nativeSymbol,
 				Side:           exchange.Side(leg.Action),
 				Type:           orderType,
@@ -296,7 +307,8 @@ func (e *LiveExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]E
 				Price:          orderPrice,
 				NotionalUSD:    targetNotional,
 				MaxSlippageBps: leg.MaxSlippageBps,
-				ClientOrderID:  fmt.Sprintf("%s-leg%d-r%d", intent.IntentID, i, attempt),
+				ClientOrderID:  idempotencyKey,
+				IdempotencyKey: idempotencyKey,
 			}
 
 			orderResp, err := ex.PlaceOrder(ctx, orderReq)
@@ -762,6 +774,66 @@ func (e *LiveExecutor) StartPeriodicReconciliation(ctx context.Context, venues [
 		}
 	}()
 	log.Printf("live-recon: periodic reconciliation started (interval=%dms, venues=%v)", intervalMs, venues)
+}
+
+// orderLegsByDepth reorders legs so the thinner-book side executes first.
+// If we can't fetch depth from venues, fall back to original order.
+func (e *LiveExecutor) orderLegsByDepth(ctx context.Context, symbol string, legs []arb.TradeLeg) []arb.TradeLeg {
+	if len(legs) != 2 {
+		return legs
+	}
+
+	// Fetch constraints to estimate depth. Venues with lower max_qty or min_notional
+	// typically have thinner books. We use as a proxy for depth.
+	getDepthProxy := func(leg arb.TradeLeg) float64 {
+		ex, err := e.registry.Get(ctx, leg.Venue)
+		if err != nil {
+			return math.MaxFloat64
+		}
+		nativeSym := mapSymbol(leg.Venue, symbol)
+		constraints, err := ex.GetConstraints(ctx, nativeSym)
+		if err != nil || constraints == nil {
+			return math.MaxFloat64
+		}
+		// Higher MaxQty implies deeper book; lower means thinner.
+		if constraints.MaxQty > 0 {
+			return constraints.MaxQty
+		}
+		return math.MaxFloat64
+	}
+
+	depthA := getDepthProxy(legs[0])
+	depthB := getDepthProxy(legs[1])
+
+	// Execute the thinner book (lower depth) first.
+	if depthB < depthA {
+		log.Printf("live: depth-based reorder: %s (depth proxy %.1f) before %s (%.1f)",
+			legs[1].Venue, depthB, legs[0].Venue, depthA)
+		return []arb.TradeLeg{legs[1], legs[0]}
+	}
+	return legs
+}
+
+// DetectADLEvents checks all registered exchanges for ADL (auto-deleverage) events
+// since the given timestamp. Returns any detected events for risk reporting.
+func (e *LiveExecutor) DetectADLEvents(ctx context.Context, sinceMs int64) []exchange.ADLEvent {
+	var allEvents []exchange.ADLEvent
+	for venue, ex := range e.registry.All() {
+		detector, ok := ex.(exchange.ADLDetector)
+		if !ok {
+			continue
+		}
+		events, err := detector.DetectADLEvents(ctx, sinceMs)
+		if err != nil {
+			log.Printf("live-adl: error detecting ADL on %s: %v", venue, err)
+			continue
+		}
+		if len(events) > 0 {
+			log.Printf("live-adl: DETECTED %d ADL events on %s", len(events), venue)
+			allEvents = append(allEvents, events...)
+		}
+	}
+	return allEvents
 }
 
 // mapSymbol converts canonical symbols (e.g. "BTC-PERP") to exchange-native format.

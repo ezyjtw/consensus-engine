@@ -309,3 +309,60 @@ func (db *DB) WriteFundingPayment(ctx context.Context, tenantID, venue, symbol s
 	)
 	return err
 }
+
+// WritePnLAttribution persists a per-venue PnL attribution record.
+func (db *DB) WritePnLAttribution(ctx context.Context, tenantID, intentID, strategy, symbol, venue, action string,
+	grossPnL, feeUSD, slippageUSD, fundingUSD, netPnL float64) error {
+	_, err := db.pool.Exec(ctx,
+		`INSERT INTO pnl_attribution
+		 (tenant_id, intent_id, strategy, symbol, venue, action, gross_pnl_usd, fee_usd, slippage_usd, funding_usd, net_pnl_usd, ts)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+		tenantID, intentID, strategy, symbol, venue, action,
+		grossPnL, feeUSD, slippageUSD, fundingUSD, netPnL,
+	)
+	return err
+}
+
+// PnLAttributionByVenue returns PnL broken down by venue with fee/slippage/funding separation.
+func (db *DB) PnLAttributionByVenue(ctx context.Context, tenantID string) ([]map[string]interface{}, error) {
+	rows, err := db.pool.Query(ctx,
+		`SELECT venue,
+		        COALESCE(SUM(gross_pnl_usd), 0) AS gross_pnl,
+		        COALESCE(SUM(fee_usd), 0)        AS total_fees,
+		        COALESCE(SUM(slippage_usd), 0)   AS total_slippage,
+		        COALESCE(SUM(funding_usd), 0)    AS total_funding,
+		        COALESCE(SUM(net_pnl_usd), 0)    AS net_pnl,
+		        COUNT(*)                          AS fill_count
+		 FROM pnl_attribution WHERE tenant_id = $1
+		 GROUP BY venue
+		 ORDER BY net_pnl DESC`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows), nil
+}
+
+// PnLAttributionByStrategy returns PnL broken down by strategy with fee/slippage/funding separation.
+func (db *DB) PnLAttributionByStrategy(ctx context.Context, tenantID string) ([]map[string]interface{}, error) {
+	rows, err := db.pool.Query(ctx,
+		`SELECT strategy,
+		        COALESCE(SUM(gross_pnl_usd), 0) AS gross_pnl,
+		        COALESCE(SUM(fee_usd), 0)        AS total_fees,
+		        COALESCE(SUM(slippage_usd), 0)   AS total_slippage,
+		        COALESCE(SUM(funding_usd), 0)    AS total_funding,
+		        COALESCE(SUM(net_pnl_usd), 0)    AS net_pnl,
+		        COUNT(*)                          AS fill_count
+		 FROM pnl_attribution WHERE tenant_id = $1
+		 GROUP BY strategy
+		 ORDER BY net_pnl DESC`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows), nil
+}
+
+// Note: ExportFills and ExportAuditLog are defined in auth.go.
