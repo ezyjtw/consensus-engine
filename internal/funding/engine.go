@@ -151,15 +151,17 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 			}
 
 			// Volatility gating: reduce position size when realized vol is elevated.
-			notional := e.policy.MaxNotionalUSD
+			symNotional := e.policy.maxNotional(sym)
+			notional := symNotional
 			notional = e.applyVolGate(ven, sym, notional)
 
 			// Bonus: increase notional slightly in optimal entry window (just after reset).
-			if optimalEntry && notional == e.policy.MaxNotionalUSD {
+			if optimalEntry && notional == symNotional {
 				log.Printf("funding: CARRY optimal entry window for %s on %s", sym, ven)
 			}
 
-			intent := e.buildCarryIntent(tenantID, sym, ven, d, notional, annualNetPct, nowMs)
+			symSlippage := e.policy.maxSlippage(sym)
+			intent := e.buildCarryIntent(tenantID, sym, ven, d, notional, annualNetPct, symSlippage, nowMs)
 			intents = append(intents, intent)
 			e.cooldown[key] = nowMs
 			e.Emitted[StrategyFundingCarry]++
@@ -206,10 +208,11 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 				continue
 			}
 
-			notional := e.policy.MaxNotionalUSD
+			notional := e.policy.maxNotional(sym)
 			notional = e.applyVolGate(ven, sym, notional)
 
-			intent := e.buildReverseCarryIntent(tenantID, sym, ven, d, notional, annualNetPct, nowMs)
+			symSlippage := e.policy.maxSlippage(sym)
+			intent := e.buildReverseCarryIntent(tenantID, sym, ven, d, notional, annualNetPct, symSlippage, nowMs)
 			intents = append(intents, intent)
 			e.cooldown[key] = nowMs
 			e.Emitted[StrategyFundingCarryReverse]++
@@ -276,13 +279,14 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 				}
 
 				// Volatility gating: use the higher vol of the two venues.
-				notional := e.policy.MaxNotionalUSD
+				notional := e.policy.maxNotional(sym)
 				notional = e.applyVolGate(vA, sym, notional)
 				notional = e.applyVolGate(vB, sym, notional)
 
+				symSlippage := e.policy.maxSlippage(sym)
 				midPrice := (dA.markPrice + dB.markPrice) / 2
 				intent := e.buildDiffIntent(tenantID, sym, vA, vB, dA, dB,
-					notional, annualNetPct, diffBps, midPrice, nowMs)
+					notional, annualNetPct, diffBps, midPrice, symSlippage, nowMs)
 				intents = append(intents, intent)
 				e.cooldown[key] = nowMs
 				e.Emitted[StrategyFundingDifferential]++
@@ -336,7 +340,7 @@ func (e *Engine) onCooldown(key string, nowMs int64) bool {
 }
 
 func (e *Engine) buildCarryIntent(tenantID, sym, venue string, d *venueData,
-	notional, annualNetPct float64, nowMs int64) arb.TradeIntent {
+	notional, annualNetPct, slippageBps float64, nowMs int64) arb.TradeIntent {
 
 	feeUSD := notional * d.feeBpsTaker * 2 / 10000
 	return arb.TradeIntent{
@@ -353,7 +357,7 @@ func (e *Engine) buildCarryIntent(tenantID, sym, venue string, d *venueData,
 				Market:         "SPOT",
 				Type:           "MARKET_OR_IOC",
 				NotionalUSD:    notional,
-				MaxSlippageBps: e.policy.MaxSlippageBps,
+				MaxSlippageBps: slippageBps,
 				PriceLimit:     d.markPrice * 1.005,
 			},
 			{
@@ -362,7 +366,7 @@ func (e *Engine) buildCarryIntent(tenantID, sym, venue string, d *venueData,
 				Market:         "PERP",
 				Type:           "MARKET_OR_IOC",
 				NotionalUSD:    notional,
-				MaxSlippageBps: e.policy.MaxSlippageBps,
+				MaxSlippageBps: slippageBps,
 				PriceLimit:     d.markPrice * 0.995,
 			},
 		},
@@ -383,7 +387,7 @@ func (e *Engine) buildCarryIntent(tenantID, sym, venue string, d *venueData,
 }
 
 func (e *Engine) buildDiffIntent(tenantID, sym, longVenue, shortVenue string,
-	dLong, dShort *venueData, notional, annualNetPct, diffBps, midPrice float64, nowMs int64) arb.TradeIntent {
+	dLong, dShort *venueData, notional, annualNetPct, diffBps, midPrice, slippageBps float64, nowMs int64) arb.TradeIntent {
 
 	feeUSD := notional * (dLong.feeBpsTaker + dShort.feeBpsTaker) * 2 / 10000
 	return arb.TradeIntent{
@@ -400,7 +404,7 @@ func (e *Engine) buildDiffIntent(tenantID, sym, longVenue, shortVenue string,
 				Market:         "PERP",
 				Type:           "MARKET_OR_IOC",
 				NotionalUSD:    notional,
-				MaxSlippageBps: e.policy.MaxSlippageBps,
+				MaxSlippageBps: slippageBps,
 				PriceLimit:     midPrice * 1.005,
 			},
 			{
@@ -409,7 +413,7 @@ func (e *Engine) buildDiffIntent(tenantID, sym, longVenue, shortVenue string,
 				Market:         "PERP",
 				Type:           "MARKET_OR_IOC",
 				NotionalUSD:    notional,
-				MaxSlippageBps: e.policy.MaxSlippageBps,
+				MaxSlippageBps: slippageBps,
 				PriceLimit:     midPrice * 0.995,
 			},
 		},
@@ -430,7 +434,7 @@ func (e *Engine) buildDiffIntent(tenantID, sym, longVenue, shortVenue string,
 }
 
 func (e *Engine) buildReverseCarryIntent(tenantID, sym, venue string, d *venueData,
-	notional, annualNetPct float64, nowMs int64) arb.TradeIntent {
+	notional, annualNetPct, slippageBps float64, nowMs int64) arb.TradeIntent {
 
 	feeUSD := notional * d.feeBpsTaker * 2 / 10000
 	return arb.TradeIntent{
@@ -447,7 +451,7 @@ func (e *Engine) buildReverseCarryIntent(tenantID, sym, venue string, d *venueDa
 				Market:         "SPOT",
 				Type:           "MARKET_OR_IOC",
 				NotionalUSD:    notional,
-				MaxSlippageBps: e.policy.MaxSlippageBps,
+				MaxSlippageBps: slippageBps,
 				PriceLimit:     d.markPrice * 0.995,
 			},
 			{
@@ -456,7 +460,7 @@ func (e *Engine) buildReverseCarryIntent(tenantID, sym, venue string, d *venueDa
 				Market:         "PERP",
 				Type:           "MARKET_OR_IOC",
 				NotionalUSD:    notional,
-				MaxSlippageBps: e.policy.MaxSlippageBps,
+				MaxSlippageBps: slippageBps,
 				PriceLimit:     d.markPrice * 1.005,
 			},
 		},

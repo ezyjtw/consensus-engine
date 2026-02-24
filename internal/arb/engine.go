@@ -67,8 +67,9 @@ func (e *Engine) Process(update ConsensusUpdate) []TradeIntent {
 		return nil
 	}
 
-	latencyBps := e.policy.latencyBuffer(quality)
-	minEdge := e.policy.minEdge(quality)
+	latencyBps := e.policy.latencyBuffer(quality, symbol)
+	minEdge := e.policy.minEdge(quality, symbol)
+	maxSlip := e.policy.maxSlippage(symbol)
 	consMid := update.Consensus.Mid
 	if consMid < epsilon {
 		return nil
@@ -76,7 +77,7 @@ func (e *Engine) Process(update ConsensusUpdate) []TradeIntent {
 
 	var candidates []TradeIntent
 
-	for _, size := range e.policy.SizeLadderUSD {
+	for _, size := range e.policy.sizeLadder(symbol) {
 		for _, pair := range pairs {
 			if len(pair) != 2 {
 				continue
@@ -95,7 +96,7 @@ func (e *Engine) Process(update ConsensusUpdate) []TradeIntent {
 				}
 
 				cooldownKey := fmt.Sprintf("%s|%s|%s", symbol, buyName, sellName)
-				if e.cooldown.IsOnCooldown(cooldownKey, update.TsMs) {
+				if e.cooldown.IsOnCooldownWithTTL(cooldownKey, update.TsMs, e.policy.cooldown(symbol)) {
 					e.Rejected[RejectCooldown]++
 					continue
 				}
@@ -127,18 +128,18 @@ func (e *Engine) Process(update ConsensusUpdate) []TradeIntent {
 							Action:         "BUY",
 							Type:           "MARKET_OR_IOC",
 							NotionalUSD:    size,
-							MaxSlippageBps: e.policy.MaxSlippageBps,
+							MaxSlippageBps: maxSlip,
 							// Conservative upper bound: the router must not fill above this.
-							PriceLimit: buyVM.EffectiveBuy * (1 + e.policy.MaxSlippageBps/10000),
+							PriceLimit: buyVM.EffectiveBuy * (1 + maxSlip/10000),
 						},
 						{
 							Venue:          sellName,
 							Action:         "SELL",
 							Type:           "MARKET_OR_IOC",
 							NotionalUSD:    size,
-							MaxSlippageBps: e.policy.MaxSlippageBps,
+							MaxSlippageBps: maxSlip,
 							// Conservative lower bound: the router must not fill below this.
-							PriceLimit: sellVM.EffectiveSell * (1 - e.policy.MaxSlippageBps/10000),
+							PriceLimit: sellVM.EffectiveSell * (1 - maxSlip/10000),
 						},
 					},
 					Expected: ExpectedMetrics{

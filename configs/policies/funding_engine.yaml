@@ -1,13 +1,20 @@
 symbols:
   - BTC-PERP
   - ETH-PERP
+  - SOL-PERP
+  - DOGE-PERP
+  - XRP-PERP
+  - AVAX-PERP
+  - LINK-PERP
+  - SUI-PERP
+  - PEPE-PERP
 
 # Minimum annualised funding yield to enter (net of fees).
 min_annual_yield_pct:
   HIGH: 8.0
   MED: 12.0
 
-# Maximum position notional per funding intent.
+# Maximum position notional per funding intent (global default, BTC/ETH).
 max_notional_usd: 50000
 
 # Minimum funding rate differential between venues (bps per 8h) to trigger
@@ -35,11 +42,37 @@ eval_interval_s: 30
 # How long an emitted funding intent is valid.
 intent_ttl_ms: 10000
 
-# Max per-leg slippage allowed in the execution router.
+# Max per-leg slippage allowed in the execution router (global default).
 max_slippage_bps: 8.0
 
 # Minimum gap between intents for the same symbol+venue to avoid spam.
 cooldown_s: 300
+
+# Per-symbol funding parameter overrides.
+# Mid-caps use smaller positions due to thinner order books, and wider slippage
+# tolerance to account for wider spreads.
+symbol_overrides:
+  SOL-PERP:
+    max_notional_usd: 20000
+    max_slippage_bps: 12.0
+  DOGE-PERP:
+    max_notional_usd: 10000
+    max_slippage_bps: 18.0
+  XRP-PERP:
+    max_notional_usd: 20000
+    max_slippage_bps: 12.0
+  AVAX-PERP:
+    max_notional_usd: 10000
+    max_slippage_bps: 15.0
+  LINK-PERP:
+    max_notional_usd: 10000
+    max_slippage_bps: 15.0
+  SUI-PERP:
+    max_notional_usd: 8000
+    max_slippage_bps: 18.0
+  PEPE-PERP:
+    max_notional_usd: 5000
+    max_slippage_bps: 25.0
 
 redis:
   addr: "localhost:6379"

@@ -24,7 +24,7 @@ func (e *Engine) Compute(
 	getStatus func(v Venue) VenueStatus,
 ) ComputeResult {
 	nowMs := time.Now().UnixMilli()
-	p := e.policy
+	p := e.policy.ResolvedPolicy(string(symbol))
 
 	// Stale data pause: if every quote is older than StalePauseMs, return an
 	// empty consensus with quality=LOW to prevent downstream use of stale prices.

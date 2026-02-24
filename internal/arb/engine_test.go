@@ -253,6 +253,78 @@ func TestOutlierFlagExclusion(t *testing.T) {
 	}
 }
 
+// Per-symbol override: SOL-PERP requires higher edge than BTC.
+// An 11 bps opportunity passes BTC min_edge (MED=10) but fails SOL min_edge (MED=15).
+func TestSymbolOverrideMinEdge(t *testing.T) {
+	p := testPolicy()
+	p.Symbols = append(p.Symbols, "SOL-PERP")
+	p.EnabledPairs["SOL-PERP"] = [][]string{{"binance", "deribit"}}
+	p.SymbolOverrides = map[string]arb.ArbSymbolOverride{
+		"SOL-PERP": {
+			MinEdgeBpsNet: map[string]float64{
+				"HIGH": 15.0,
+				"MED":  20.0,
+			},
+		},
+	}
+
+	// Prices that produce ~15 bps net edge (with MED latency buffer 4 bps):
+	// buy=99880 sell=100110 → after latency: grossEdge ≈ 15 bps
+	venues := []consensus.VenueMetrics{
+		makeVenue("binance", 99880.0, 99870.0, consensus.StateOK),
+		makeVenue("deribit", 100120.0, 100110.0, consensus.StateOK),
+	}
+
+	// BTC with global thresholds: 15 bps > MED=10 → should emit
+	btcUpdate := makeUpdate("MED", venues)
+	btcUpdate.Symbol = "BTC-PERP"
+	eBtc := arb.NewEngine(p)
+	btcIntents := eBtc.Process(btcUpdate)
+	if len(btcIntents) == 0 {
+		t.Error("BTC-PERP: expected intent (edge ~15 bps > min_edge MED=10)")
+	}
+
+	// SOL with override: 15 bps < MED=20 → should NOT emit
+	solUpdate := makeUpdate("MED", venues)
+	solUpdate.Symbol = "SOL-PERP"
+	eSol := arb.NewEngine(p)
+	solIntents := eSol.Process(solUpdate)
+	if len(solIntents) != 0 {
+		t.Errorf("SOL-PERP: expected 0 intents (edge ~15 bps < min_edge MED=20), got %d", len(solIntents))
+	}
+}
+
+// Per-symbol size ladder: SOL uses smaller sizes.
+func TestSymbolOverrideSizeLadder(t *testing.T) {
+	p := testPolicy()
+	p.Symbols = append(p.Symbols, "SOL-PERP")
+	p.EnabledPairs["SOL-PERP"] = [][]string{{"binance", "deribit"}}
+	smallLadder := []float64{2000, 1000}
+	p.SymbolOverrides = map[string]arb.ArbSymbolOverride{
+		"SOL-PERP": {
+			SizeLadderUSD: smallLadder,
+		},
+	}
+
+	venues := []consensus.VenueMetrics{
+		makeVenue("binance", 99880.0, 99870.0, consensus.StateOK),
+		makeVenue("deribit", 100120.0, 100110.0, consensus.StateOK),
+	}
+
+	solUpdate := makeUpdate("MED", venues)
+	solUpdate.Symbol = "SOL-PERP"
+	e := arb.NewEngine(p)
+	intents := e.Process(solUpdate)
+	if len(intents) == 0 {
+		t.Fatal("SOL-PERP: expected intent")
+	}
+	// The first (largest) size tried should be 2000, not 10000
+	if intents[0].Legs[0].NotionalUSD > 2000 {
+		t.Errorf("SOL-PERP: expected notional ≤ 2000 (from override ladder), got %.0f",
+			intents[0].Legs[0].NotionalUSD)
+	}
+}
+
 // 8. Two disjoint opportunities on different pair sets → both emitted.
 func TestDisjointPairsEmitTwo(t *testing.T) {
 	p := testPolicy()

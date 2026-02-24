@@ -3,26 +3,74 @@ tenant_id: "default"
 venues:
   binance:
     ws_url: "wss://fstream.binance.com/stream"
-    symbols: ["BTCUSDT", "ETHUSDT"]
+    symbols:
+      - "BTCUSDT"
+      - "ETHUSDT"
+      - "SOLUSDT"
+      - "DOGEUSDT"
+      - "XRPUSDT"
+      - "AVAXUSDT"
+      - "LINKUSDT"
+      - "SUIUSDT"
+      - "PEPEUSDT"
     symbol_map:
       BTCUSDT: "BTC-PERP"
       ETHUSDT: "ETH-PERP"
+      SOLUSDT: "SOL-PERP"
+      DOGEUSDT: "DOGE-PERP"
+      XRPUSDT: "XRP-PERP"
+      AVAXUSDT: "AVAX-PERP"
+      LINKUSDT: "LINK-PERP"
+      SUIUSDT: "SUI-PERP"
+      PEPEUSDT: "PEPE-PERP"
     fee_bps_taker: 4.0
 
   okx:
     ws_url: "wss://ws.okx.com:8443/ws/v5/public"
-    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+    symbols:
+      - "BTC-USDT-SWAP"
+      - "ETH-USDT-SWAP"
+      - "SOL-USDT-SWAP"
+      - "DOGE-USDT-SWAP"
+      - "XRP-USDT-SWAP"
+      - "AVAX-USDT-SWAP"
+      - "LINK-USDT-SWAP"
+      - "SUI-USDT-SWAP"
+      - "PEPE-USDT-SWAP"
     symbol_map:
       BTC-USDT-SWAP: "BTC-PERP"
       ETH-USDT-SWAP: "ETH-PERP"
+      SOL-USDT-SWAP: "SOL-PERP"
+      DOGE-USDT-SWAP: "DOGE-PERP"
+      XRP-USDT-SWAP: "XRP-PERP"
+      AVAX-USDT-SWAP: "AVAX-PERP"
+      LINK-USDT-SWAP: "LINK-PERP"
+      SUI-USDT-SWAP: "SUI-PERP"
+      PEPE-USDT-SWAP: "PEPE-PERP"
     fee_bps_taker: 5.0
 
   bybit:
     ws_url: "wss://stream.bybit.com/v5/public/linear"
-    symbols: ["BTCUSDT", "ETHUSDT"]
+    symbols:
+      - "BTCUSDT"
+      - "ETHUSDT"
+      - "SOLUSDT"
+      - "DOGEUSDT"
+      - "XRPUSDT"
+      - "AVAXUSDT"
+      - "LINKUSDT"
+      - "SUIUSDT"
+      - "PEPEUSDT"
     symbol_map:
       BTCUSDT: "BTC-PERP"
       ETHUSDT: "ETH-PERP"
+      SOLUSDT: "SOL-PERP"
+      DOGEUSDT: "DOGE-PERP"
+      XRPUSDT: "XRP-PERP"
+      AVAXUSDT: "AVAX-PERP"
+      LINKUSDT: "LINK-PERP"
+      SUIUSDT: "SUI-PERP"
+      PEPEUSDT: "PEPE-PERP"
     fee_bps_taker: 5.5
 
   deribit:
@@ -32,6 +80,7 @@ venues:
       BTC-PERPETUAL: "BTC-PERP"
       ETH-PERPETUAL: "ETH-PERP"
     fee_bps_taker: 5.0
+    # Deribit only lists BTC/ETH perpetuals — mid-caps not available.
 
 # Optional venues (uncomment to enable)
 #  htx:

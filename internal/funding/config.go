@@ -7,6 +7,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// FundingSymbolOverride allows per-symbol tuning of funding strategy parameters.
+// Mid-cap tokens warrant smaller position sizes and wider slippage tolerance.
+type FundingSymbolOverride struct {
+	MaxNotionalUSD *float64 `yaml:"max_notional_usd,omitempty"`
+	MaxSlippageBps *float64 `yaml:"max_slippage_bps,omitempty"`
+}
+
 type Policy struct {
 	Symbols                []string           `yaml:"symbols"`
 	MinAnnualYieldPct      map[string]float64 `yaml:"min_annual_yield_pct"`
@@ -19,7 +26,28 @@ type Policy struct {
 	IntentTTLMs            int64              `yaml:"intent_ttl_ms"`
 	MaxSlippageBps         float64            `yaml:"max_slippage_bps"`
 	CooldownS              int64              `yaml:"cooldown_s"`
-	Redis                  RedisPolicy        `yaml:"redis"`
+
+	// SymbolOverrides provides per-symbol funding parameter tuning.
+	// Keyed by canonical symbol (e.g. "SOL-PERP").
+	SymbolOverrides map[string]FundingSymbolOverride `yaml:"symbol_overrides"`
+
+	Redis RedisPolicy `yaml:"redis"`
+}
+
+// maxNotional returns the max notional for a symbol, falling back to global.
+func (p *Policy) maxNotional(symbol string) float64 {
+	if ovr, ok := p.SymbolOverrides[symbol]; ok && ovr.MaxNotionalUSD != nil {
+		return *ovr.MaxNotionalUSD
+	}
+	return p.MaxNotionalUSD
+}
+
+// maxSlippage returns the max slippage for a symbol, falling back to global.
+func (p *Policy) maxSlippage(symbol string) float64 {
+	if ovr, ok := p.SymbolOverrides[symbol]; ok && ovr.MaxSlippageBps != nil {
+		return *ovr.MaxSlippageBps
+	}
+	return p.MaxSlippageBps
 }
 
 type VolatilityGate struct {
