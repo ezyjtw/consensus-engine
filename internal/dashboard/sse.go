@@ -70,7 +70,7 @@ func (h *StreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-heartbeat.C:
-			fmt.Fprintf(w, ": ping\n\n")
+			_, _ = fmt.Fprintf(w, ": ping\n\n")
 			flusher.Flush()
 		case <-killPoll.C:
 			if ks, err := h.store.GetKillSwitch(ctx); err == nil {
@@ -81,9 +81,7 @@ func (h *StreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Build the alternating streams+ids slice required by XRead.
 		streamArgs := make([]string, 0, len(redisStreams)*2)
-		for _, s := range redisStreams {
-			streamArgs = append(streamArgs, s)
-		}
+		streamArgs = append(streamArgs, redisStreams...)
 		for _, s := range redisStreams {
 			streamArgs = append(streamArgs, lastIDs[s])
 		}
@@ -132,7 +130,7 @@ func (h *StreamHandler) write(w http.ResponseWriter, f http.Flusher, evType stri
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(w, "data: %s\n\n", b)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
 	f.Flush()
 }
 

@@ -49,7 +49,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create bus: %v", err)
 	}
-	defer bus.Close()
+	defer bus.Close() //nolint:errcheck
 
 	ctx, cancel := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)

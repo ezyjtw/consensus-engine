@@ -84,7 +84,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("liquidity-engine: redis connect: %v", err)
 	}
-	defer sc.Close()
+	defer sc.Close() //nolint:errcheck
 
 	ctx, cancel := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)

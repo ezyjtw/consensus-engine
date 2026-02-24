@@ -52,7 +52,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create bus: %v", err)
 	}
-	defer bus.Close()
+	defer bus.Close() //nolint:errcheck
 
 	priceCache := execution.NewPriceCache()
 	executor := execution.NewPaperExecutor(cfg, priceCache)

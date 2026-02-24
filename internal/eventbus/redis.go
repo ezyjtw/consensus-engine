@@ -23,7 +23,7 @@ type RedisConfig struct {
 	OutputStatus    string
 	ConsumerGroup   string
 	ConsumerName    string
-	BlockMs         time.Duration
+	BlockMs         time.Duration //nolint:staticcheck // field name matches YAML config key
 	BatchSize       int64
 }
 
