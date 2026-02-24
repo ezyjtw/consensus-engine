@@ -25,6 +25,15 @@ func (c *Cooldown) IsOnCooldown(key string, nowMs int64) bool {
 	return ok && nowMs-last < c.ttlMs
 }
 
+// IsOnCooldownWithTTL is like IsOnCooldown but uses a caller-supplied TTL
+// instead of the default. Used for per-symbol cooldown overrides.
+func (c *Cooldown) IsOnCooldownWithTTL(key string, nowMs, ttlMs int64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	last, ok := c.lastMs[key]
+	return ok && nowMs-last < ttlMs
+}
+
 // Mark records nowMs as the last-seen time for the given key.
 func (c *Cooldown) Mark(key string, nowMs int64) {
 	c.mu.Lock()

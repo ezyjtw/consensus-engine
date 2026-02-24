@@ -153,6 +153,87 @@ func TestQualityHighFourOKVenues(t *testing.T) {
 	}
 }
 
+// Per-symbol override: a ~30 bps deviation exceeds BTC warn threshold (25 bps)
+// but is within DOGE warn threshold (80 bps). Venues are spread to produce a
+// nonzero MAD so the robust z-score stays below 6.
+func TestSymbolOverrideOutlierThreshold(t *testing.T) {
+	p := testPolicy()
+	warnBps := 80.0
+	blacklistBps := 150.0
+	p.SymbolOverrides = map[string]SymbolOverride{
+		"DOGE-PERP": {
+			OutlierBpsWarn:      &warnBps,
+			OutlierBpsBlacklist: &blacklistBps,
+		},
+	}
+	engine := NewEngine(p)
+
+	// At price ~100000, 1 bps = $10. For a ~35 bps deviation we need ~$350 offset.
+	// Spread venues to produce nonzero MAD so z-score doesn't dominate:
+	// Mids: 99900, 99950, 100050, 100350. Median ≈ 100000, MAD ≈ 50.
+	// Binance at 100350 → devBps ≈ 350/100000 * 10000 ≈ 35 bps.
+	// z-score ≈ 350/74 ≈ 4.7 (below 6), so only devBps matters.
+	quotes := map[Venue]Quote{
+		"binance": makeQuote("binance", 100_350, 10), // ~35 bps from median
+		"okx":     makeQuote("okx", 99_900, 10),
+		"bybit":   makeQuote("bybit", 99_950, 10),
+		"deribit": makeQuote("deribit", 100_050, 10),
+	}
+
+	// BTC (warn=25): ~35 bps deviation > 25 → flagged OUTLIER
+	btcResult := engine.Compute("t1", "BTC-PERP", quotes, okStatus)
+	var btcBinance *VenueMetrics
+	for i := range btcResult.Update.Venues {
+		if btcResult.Update.Venues[i].Venue == "binance" {
+			btcBinance = &btcResult.Update.Venues[i]
+		}
+	}
+	if btcBinance == nil {
+		t.Fatal("binance not in BTC result")
+	}
+	btcFlagged := false
+	for _, f := range btcBinance.Flags {
+		if f == "OUTLIER" {
+			btcFlagged = true
+		}
+	}
+	if !btcFlagged {
+		t.Errorf("BTC-PERP: deviation (%.1f bps) should be flagged OUTLIER (warn=25), flags=%v",
+			btcBinance.DeviationBps, btcBinance.Flags)
+	}
+
+	// DOGE (warn=80): same ~28 bps deviation < 80 → NOT flagged
+	dogeResult := engine.Compute("t1", "DOGE-PERP", quotes, okStatus)
+	var dogeBinance *VenueMetrics
+	for i := range dogeResult.Update.Venues {
+		if dogeResult.Update.Venues[i].Venue == "binance" {
+			dogeBinance = &dogeResult.Update.Venues[i]
+		}
+	}
+	if dogeBinance == nil {
+		t.Fatal("binance not in DOGE result")
+	}
+	dogeFlagged := false
+	for _, f := range dogeBinance.Flags {
+		if f == "OUTLIER" {
+			dogeFlagged = true
+		}
+	}
+	if dogeFlagged {
+		t.Errorf("DOGE-PERP: deviation (%.1f bps) should NOT be flagged (warn=80), flags=%v",
+			dogeBinance.DeviationBps, dogeBinance.Flags)
+	}
+}
+
+// ResolvedPolicy returns the base policy when no override exists.
+func TestResolvedPolicyNoOverride(t *testing.T) {
+	p := testPolicy()
+	resolved := p.ResolvedPolicy("BTC-PERP")
+	if resolved != p {
+		t.Error("expected same pointer when no override exists")
+	}
+}
+
 // spec §4.10: fewer than MinCoreQuorum eligible → LOW
 func TestQualityLowBelowQuorum(t *testing.T) {
 	engine := NewEngine(testPolicy()) // MinCoreQuorum=3

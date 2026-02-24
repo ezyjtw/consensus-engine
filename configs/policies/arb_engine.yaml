@@ -1,12 +1,20 @@
 symbols:
   - BTC-PERP
   - ETH-PERP
+  - SOL-PERP
+  - DOGE-PERP
+  - XRP-PERP
+  - AVAX-PERP
+  - LINK-PERP
+  - SUI-PERP
+  - PEPE-PERP
 
 # Minimum consensus quality required to emit any intent.
 # LOW is always rejected. MED requires higher edge threshold than HIGH.
 min_consensus_quality: MED
 
 # Net edge required per quality level (in basis points, after latency buffers).
+# These are the GLOBAL defaults — tuned for BTC/ETH majors.
 min_edge_bps_net:
   HIGH: 6.0
   MED: 10.0
@@ -46,6 +54,7 @@ ignore_flagged_venues: true
 
 # Each pair [A, B] is checked in BOTH directions (buy-A/sell-B and buy-B/sell-A).
 # Only pairs listed here are evaluated for a given symbol.
+# Note: Deribit only lists BTC/ETH perps, so mid-caps use binance/okx/bybit only.
 enabled_pairs:
   BTC-PERP:
     - [binance, okx]
@@ -61,6 +70,110 @@ enabled_pairs:
     - [okx, bybit]
     - [okx, deribit]
     - [bybit, deribit]
+  SOL-PERP:
+    - [binance, okx]
+    - [binance, bybit]
+    - [okx, bybit]
+  DOGE-PERP:
+    - [binance, okx]
+    - [binance, bybit]
+    - [okx, bybit]
+  XRP-PERP:
+    - [binance, okx]
+    - [binance, bybit]
+    - [okx, bybit]
+  AVAX-PERP:
+    - [binance, okx]
+    - [binance, bybit]
+    - [okx, bybit]
+  LINK-PERP:
+    - [binance, okx]
+    - [binance, bybit]
+    - [okx, bybit]
+  SUI-PERP:
+    - [binance, okx]
+    - [binance, bybit]
+    - [okx, bybit]
+  PEPE-PERP:
+    - [binance, okx]
+    - [binance, bybit]
+    - [okx, bybit]
+
+# Per-symbol arb threshold overrides.
+# Mid-caps have wider natural spreads = less HFT competition = more edge for us.
+# Higher min_edge_bps filters out noise; smaller size ladder matches thinner books;
+# wider max_slippage accounts for real fill conditions on mid-cap order books.
+symbol_overrides:
+  SOL-PERP:
+    min_edge_bps_net:
+      HIGH: 10.0
+      MED: 15.0
+    latency_buffer_bps:
+      HIGH: 4.0
+      MED: 6.0
+    size_ladder_usd: [5000, 2000, 1000]
+    max_slippage_bps: 12.0
+    cooldown_ms: 500
+  DOGE-PERP:
+    min_edge_bps_net:
+      HIGH: 15.0
+      MED: 25.0
+    latency_buffer_bps:
+      HIGH: 6.0
+      MED: 10.0
+    size_ladder_usd: [3000, 1500, 500]
+    max_slippage_bps: 18.0
+    cooldown_ms: 1000
+  XRP-PERP:
+    min_edge_bps_net:
+      HIGH: 10.0
+      MED: 15.0
+    latency_buffer_bps:
+      HIGH: 4.0
+      MED: 6.0
+    size_ladder_usd: [5000, 2000, 1000]
+    max_slippage_bps: 12.0
+    cooldown_ms: 500
+  AVAX-PERP:
+    min_edge_bps_net:
+      HIGH: 12.0
+      MED: 20.0
+    latency_buffer_bps:
+      HIGH: 5.0
+      MED: 8.0
+    size_ladder_usd: [3000, 1500, 500]
+    max_slippage_bps: 15.0
+    cooldown_ms: 800
+  LINK-PERP:
+    min_edge_bps_net:
+      HIGH: 12.0
+      MED: 20.0
+    latency_buffer_bps:
+      HIGH: 5.0
+      MED: 8.0
+    size_ladder_usd: [3000, 1500, 500]
+    max_slippage_bps: 15.0
+    cooldown_ms: 800
+  SUI-PERP:
+    min_edge_bps_net:
+      HIGH: 15.0
+      MED: 25.0
+    latency_buffer_bps:
+      HIGH: 6.0
+      MED: 10.0
+    size_ladder_usd: [2000, 1000, 500]
+    max_slippage_bps: 18.0
+    cooldown_ms: 1000
+  PEPE-PERP:
+    min_edge_bps_net:
+      HIGH: 20.0
+      MED: 35.0
+    latency_buffer_bps:
+      HIGH: 8.0
+      MED: 15.0
+    size_ladder_usd: [2000, 1000, 500]
+    max_slippage_bps: 25.0
+    cooldown_ms: 2000
 
 # Spot-futures basis convergence strategy.
 # Detects when mark-index basis is elevated and trades mean-reversion.
