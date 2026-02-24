@@ -1495,7 +1495,28 @@ async function setMode(mode) {
 let currentTradingMode = 'PAPER';
 let currentConfScore = 0;
 
+const DEFAULT_INITIAL_CAPITAL = 100000;
+
+function renderEquity(eq) {
+  const initial = (eq && parseFloat(eq.initial_capital_usd) > 0)
+    ? parseFloat(eq.initial_capital_usd) : DEFAULT_INITIAL_CAPITAL;
+  const current = (eq && parseFloat(eq.current_equity_usd) > 0)
+    ? parseFloat(eq.current_equity_usd) : initial;
+  const deployed = (eq && parseFloat(eq.deployed_usd)) || 0;
+  const available = current - deployed;
+  const col = current >= initial ? 'var(--green)' : 'var(--red)';
+  const el = document.getElementById('tm-balance');
+  if (el) { el.textContent = fmtUSD(current); el.style.color = col; }
+  setVal('tm-initial', fmtUSD(initial));
+  setVal('tm-deployed', fmtUSD(deployed));
+  const avEl = document.getElementById('tm-available');
+  if (avEl) { avEl.textContent = fmtUSD(available); avEl.style.color = available > 0 ? 'var(--green)' : 'var(--red)'; }
+}
+
 async function loadTradingMode() {
+  // Show defaults immediately so the card isn't blank while APIs load.
+  renderEquity(null);
+  updateTradingModeUI();
   try {
     const [modeR, eqR] = await Promise.all([
       fetch('/api/paper/mode', { headers: authHeaders() }),
@@ -1508,17 +1529,7 @@ async function loadTradingMode() {
     }
     if (eqR.ok) {
       const eq = await eqR.json();
-      const initial = parseFloat(eq.initial_capital_usd) || 100000;
-      const current = parseFloat(eq.current_equity_usd) || initial;
-      const deployed = parseFloat(eq.deployed_usd) || 0;
-      const available = current - deployed;
-      const col = current >= initial ? 'var(--green)' : 'var(--red)';
-      const el = document.getElementById('tm-balance');
-      if (el) { el.textContent = fmtUSD(current); el.style.color = col; }
-      setVal('tm-initial', fmtUSD(initial));
-      setVal('tm-deployed', fmtUSD(deployed));
-      const avEl = document.getElementById('tm-available');
-      if (avEl) { avEl.textContent = fmtUSD(available); avEl.style.color = available > 0 ? 'var(--green)' : 'var(--red)'; }
+      renderEquity(eq);
     }
   } catch(e) { console.warn('loadTradingMode:', e); }
 }
