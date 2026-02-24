@@ -1,0 +1,29 @@
+---
+# Liquidation keeper engine configuration
+keeper:
+  min_profit_usd: 10             # minimum net profit to execute
+  max_position_usd: 500000       # maximum position size to liquidate
+  gas_estimate_gwei: 30           # base gas price estimate
+  gas_limit_liq: 500000           # gas limit for liquidation tx
+  health_factor_max: 1.0          # only liquidate below this
+  max_concurrent: 3               # max simultaneous liquidations
+  cooldown_ms: 30000              # cooldown per account after liquidation
+  flash_loan_enabled: true        # use flash loans for capital efficiency
+
+  protocols:
+    - name: aave-v3
+      chain_id: 1
+      liquidation_bonus: 0.05
+    - name: compound-v3
+      chain_id: 1
+      liquidation_bonus: 0.08
+    - name: aave-v3-arb
+      chain_id: 42161
+      liquidation_bonus: 0.05
+
+redis:
+  addr: "localhost:6379"
+  output_stream: "liquidation:candidates"
+  keeper_events_stream: "keeper:events"
+  consumer_group: "keeper-engine"
+  consumer_name: "keeper-1"

@@ -113,6 +113,22 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	s.mux.HandleFunc("GET /api/optimizer/params", s.authRole(auth.RoleTrader, gw.handleOptimizerParams))
 	s.mux.HandleFunc("GET /api/venue-scores", s.auth(gw.handleVenueScores))
 
+	// ── V5: Yield & On-chain ──────────────────────────────────────────────
+	s.mux.HandleFunc("GET /api/yield/overview", s.auth(gw.handleYieldOverview))
+	s.mux.HandleFunc("GET /api/yield/sources", s.auth(gw.handleYieldSources))
+	s.mux.HandleFunc("GET /api/yield/portfolio", s.auth(gw.handleYieldPortfolio))
+	s.mux.HandleFunc("GET /api/onchain/txs", s.auth(gw.handleOnchainTxs))
+	s.mux.HandleFunc("GET /api/onchain/wallet", s.auth(gw.handleOnchainWallet))
+	s.mux.HandleFunc("GET /api/bridge/transfers", s.auth(gw.handleBridgeTransfers))
+	s.mux.HandleFunc("GET /api/bridge/alerts", s.auth(gw.handleBridgeAlerts))
+	s.mux.HandleFunc("GET /api/keeper/stats", s.auth(gw.handleKeeperStats))
+	s.mux.HandleFunc("GET /api/keeper/candidates", s.auth(gw.handleKeeperCandidates))
+	s.mux.HandleFunc("GET /api/dex/pools", s.auth(gw.handleDEXPools))
+	s.mux.HandleFunc("GET /api/defi/risk", s.auth(gw.handleDeFiRisk))
+	s.mux.HandleFunc("GET /api/defi/depeg", s.auth(gw.handleDepegAlerts))
+	s.mux.HandleFunc("GET /api/maker-rebate/report", s.auth(gw.handleMakerRebateReport))
+	s.mux.HandleFunc("GET /api/triangular/opportunities", s.auth(gw.handleTriangularOpps))
+
 	// Health (public)
 	s.mux.HandleFunc("GET /api/health", gw.handleHealth)
 }
@@ -1486,4 +1502,201 @@ func clamp(v, lo, hi float64) float64 {
 		return hi
 	}
 	return v
+}
+
+// ── V5: Yield & On-chain endpoints ──────────────────────────────────────
+
+func (gw *Gateway) handleYieldOverview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "yield:overview:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"total_allocated_usd": 0,
+			"weighted_apy":        0,
+			"yield_per_day_usd":   0,
+			"sources":             0,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleYieldSources(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "yield:sources:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{"sources": []interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleYieldPortfolio(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "yield:portfolio:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"allocations": []interface{}{},
+			"reserves_usd": 0,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleOnchainTxs(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	count, _ := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64)
+	if count == 0 {
+		count = 50
+	}
+	msgs, _ := gw.rdb.XRevRangeN(ctx, "onchain:tx_events", "+", "-", count).Result()
+	jsonOK(w, map[string]interface{}{
+		"transactions": parseJSONList(extractData(msgs)),
+		"count":        len(msgs),
+	})
+}
+
+func (gw *Gateway) handleOnchainWallet(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "onchain:wallet:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"address":     "",
+			"pending_txs": 0,
+			"chains":      []interface{}{},
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleBridgeTransfers(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "bridge:active:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"transfers": []interface{}{},
+			"stats":     map[string]interface{}{},
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleBridgeAlerts(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "bridge:alerts:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{"alerts": []interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleKeeperStats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "keeper:stats:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"positions_monitored": 0,
+			"liquidations_found":  0,
+			"liquidations_exec":   0,
+			"total_profit_usd":    0,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleKeeperCandidates(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "keeper:candidates:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{"candidates": []interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleDEXPools(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "dex:pools:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"pools":      []interface{}{},
+			"pool_count": 0,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleDeFiRisk(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "defi:risk:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"protocols":    []interface{}{},
+			"oracle_alerts": []interface{}{},
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleDepegAlerts(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "defi:depeg:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{"alerts": []interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleMakerRebateReport(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "makerrebate:report:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{
+			"venues":        []interface{}{},
+			"opportunities": []interface{}{},
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func (gw *Gateway) handleTriangularOpps(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	data, _ := gw.rdb.Get(ctx, "triangular:opps:"+gw.tenantID).Result()
+	if data == "" {
+		jsonOK(w, map[string]interface{}{"opportunities": []interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(data))
+}
+
+func extractData(msgs []redis.XMessage) []string {
+	var result []string
+	for _, m := range msgs {
+		if raw, ok := m.Values["data"].(string); ok {
+			result = append(result, raw)
+		}
+	}
+	return result
 }

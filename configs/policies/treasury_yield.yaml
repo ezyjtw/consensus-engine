@@ -1,0 +1,37 @@
+---
+# Treasury yield router configuration
+yield:
+  max_risk_score: 40              # protocol risk ceiling (0-100)
+  max_single_alloc_pct: 30        # max % in one source
+  max_lock_days: 7                # maximum lock period
+  min_apy_pct: 1.0                # minimum APY threshold
+  reserves_pct: 20                # keep liquid for operations
+  rebalance_thresh_pct: 5         # trigger rebalance when off by 5%
+
+  sources:
+    - id: aave-v3-usdc
+      protocol: aave-v3
+      chain_id: 1
+      asset: USDC
+      type: LENDING
+    - id: compound-v3-usdc
+      protocol: compound-v3
+      chain_id: 1
+      asset: USDC
+      type: LENDING
+    - id: ondo-ousg
+      protocol: ondo
+      chain_id: 1
+      asset: OUSG
+      type: TBILL
+    - id: maker-dsr
+      protocol: maker
+      chain_id: 1
+      asset: sDAI
+      type: LENDING
+
+redis:
+  addr: "localhost:6379"
+  output_stream: "yield:allocations"
+  consumer_group: "treasury-yield"
+  consumer_name: "treasury-1"

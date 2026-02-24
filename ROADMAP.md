@@ -199,3 +199,25 @@ High-performance market intelligence, execution optimisation, and adaptive strat
 | **7. Advanced Alpha** | Cross-asset arbitrage, liquidity mirroring with pattern detection |
 
 **New packages:** `orderbook`, `fairvalue`, `smartrouter`, `inventory`, `regime`, `optimizer`, `prediction`, `pipeline`
+
+### V5 — Yield & On-Chain Infrastructure
+
+**Goal:** Extend the platform with yield capture strategies, on-chain execution infrastructure, DeFi risk management, and cross-chain bridge monitoring.
+
+**Status: Complete.** All requirements met across 5 domains:
+
+| Domain | Key Components |
+|---|---|
+| **Quick Wins** | Triangular arbitrage engine, maker rebate optimizer |
+| **On-Chain Infrastructure** | Wallet management, nonce manager, transaction builder, simulation, DEX pool indexer |
+| **Yield Engines** | Treasury yield router, liquidation keeper engine, DeFi risk models (IL, depeg, oracle) |
+| **Bridge & Cross-Chain** | Bridge transfer monitor, challenge window tracking, multi-bridge support |
+| **Dashboard & Ops** | 14 new API endpoints: yield overview/sources/portfolio, onchain txs/wallet, bridge transfers/alerts, keeper stats/candidates, DEX pools, DeFi risk/depeg, maker rebate, triangular arb |
+
+**New services:** `cmd/onchain-market-data`, `cmd/onchain-execution`, `cmd/keeper-engine`, `cmd/treasury-yield-router`
+
+**New packages:** `triangular`, `makerrebate`, `onchain`, `dexindex`, `defirisk`, `keeper`, `bridge`, `treasuryyield`
+
+**New event streams:** `dex:pool_state`, `dex:quotes`, `lending:rates`, `liquidation:candidates`, `onchain:tx_events`, `bridge:status`, `yield:allocations`, `keeper:events`
+
+**New documentation:** `docs/yield-strategies.md`, `docs/onchain-ops.md`, `docs/compliance-matrix.md`
