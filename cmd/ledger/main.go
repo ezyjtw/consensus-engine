@@ -69,7 +69,7 @@ func main() {
 		"risk:state",
 		"trade:intents",          // raw proposals from arb + funding engines
 		"trade:intents:approved", // post-allocator approved intents
-		"venue_status_updates",   // consensus engine publishes venue state transitions here
+		"consensus:status",       // consensus engine publishes venue state transitions here
 	}
 	for _, s := range streams {
 		if err := sc.EnsureConsumerGroup(ctx, s, group); err != nil {
@@ -149,7 +149,7 @@ func persistMsg(ctx context.Context, db *ledger.DB, stream, raw, tenantID string
 				log.Printf("ledger: write risk state: %v", err)
 			}
 		}
-	case "venue_status_updates":
+	case "consensus:status":
 		var su consensus.VenueStatusUpdate
 		if err := json.Unmarshal([]byte(raw), &su); err == nil {
 			key := string(su.Venue) + ":" + string(su.Symbol)

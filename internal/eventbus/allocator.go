@@ -19,6 +19,7 @@ type AllocatorBusConfig struct {
 	InputStream   string // trade:intents
 	OutputStream  string // trade:intents:approved
 	FillsStream   string // demo:fills or live:fills — for notional release
+	OIStream      string // market:open_interest — for OI-gated sizing
 	ConsumerGroup string
 	ConsumerName  string
 	BlockMs       time.Duration //nolint:staticcheck // field name matches YAML config key
@@ -45,6 +46,12 @@ func NewAllocatorBus(cfg AllocatorBusConfig) (*AllocatorBus, error) {
 	if cfg.FillsStream != "" {
 		if err := sc.EnsureConsumerGroup(ctx, cfg.FillsStream, cfg.ConsumerGroup); err != nil {
 			log.Printf("allocator bus: fills group on %q: %v (ok if stream not yet created)", cfg.FillsStream, err)
+		}
+	}
+	if cfg.OIStream != "" {
+		oiGroup := cfg.ConsumerGroup + "-oi"
+		if err := sc.EnsureConsumerGroup(ctx, cfg.OIStream, oiGroup); err != nil {
+			log.Printf("allocator bus: OI group on %q: %v (ok if stream not yet created)", cfg.OIStream, err)
 		}
 	}
 	return &AllocatorBus{sc: sc, cfg: cfg}, nil
@@ -75,6 +82,32 @@ func (b *AllocatorBus) ReadFills(ctx context.Context) ([]execution.SimulatedFill
 		_ = b.sc.Ack(ctx, b.cfg.FillsStream, b.cfg.ConsumerGroup, m.ID)
 	}
 	return fills, nil
+}
+
+// ReadOIUpdates reads open interest updates from the OI stream.
+// Returns raw JSON strings for the OI tracker to parse.
+func (b *AllocatorBus) ReadOIUpdates(ctx context.Context) ([]string, error) {
+	if b.cfg.OIStream == "" {
+		return nil, nil
+	}
+	oiGroup := b.cfg.ConsumerGroup + "-oi"
+	msgs, err := b.sc.ReadMessages(ctx,
+		b.cfg.OIStream, oiGroup, b.cfg.ConsumerName,
+		b.cfg.BatchSize, 100*time.Millisecond)
+	if err != nil {
+		return nil, err
+	}
+	var raws []string
+	for _, m := range msgs {
+		raw, ok := m.Values["data"].(string)
+		if !ok {
+			_ = b.sc.Ack(ctx, b.cfg.OIStream, oiGroup, m.ID)
+			continue
+		}
+		raws = append(raws, raw)
+		_ = b.sc.Ack(ctx, b.cfg.OIStream, oiGroup, m.ID)
+	}
+	return raws, nil
 }
 
 // ReadIntents reads a batch of raw trade intents from the input stream.

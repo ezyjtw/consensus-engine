@@ -51,6 +51,7 @@ func main() {
 		InputStream:   policy.Redis.InputStream,
 		OutputStream:  policy.Redis.OutputStream,
 		FillsStream:   policy.Redis.FillsStream,
+		OIStream:      policy.OIStream,
 		ConsumerGroup: policy.Redis.ConsumerGroup,
 		ConsumerName:  policy.Redis.ConsumerName,
 		BlockMs:       time.Duration(policy.Redis.BlockMs) * time.Millisecond,
@@ -64,6 +65,32 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Background goroutine: drain market:open_interest and feed OI tracker.
+	if policy.OIStream != "" {
+		log.Printf("capital-allocator: OI stream=%s", policy.OIStream)
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				raws, err := bus.ReadOIUpdates(ctx)
+				if err != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					log.Printf("capital-allocator: OI read error: %v", err)
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+				for _, raw := range raws {
+					oiTracker.Update(raw)
+				}
+			}
+		}()
+	}
 
 	statsTicker := time.NewTicker(30 * time.Second)
 	defer statsTicker.Stop()

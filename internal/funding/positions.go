@@ -25,8 +25,7 @@ func NewPositionTracker() *PositionTracker {
 }
 
 // ProcessEvent updates position state from an execution event.
-// Entry events (FUNDING_CARRY, FUNDING_DIFFERENTIAL) open or increase positions.
-// Exit events (FUNDING_CARRY_EXIT, FUNDING_DIFFERENTIAL_EXIT) close or reduce them.
+// Entry events open or increase positions. Exit events close or reduce them.
 func (pt *PositionTracker) ProcessEvent(ev execution.ExecutionEvent) {
 	if ev.EventType != "ORDER_FILLED" {
 		return
@@ -37,6 +36,10 @@ func (pt *PositionTracker) ProcessEvent(ev execution.ExecutionEvent) {
 		pt.processCarryEntry(ev)
 	case StrategyFundingCarryExit:
 		pt.processCarryExit(ev)
+	case StrategyFundingCarryReverse:
+		pt.processReverseCarryEntry(ev)
+	case StrategyFundingCarryReverseExit:
+		pt.processCarryExit(ev) // same unwind logic, keyed by "reverse_carry:"
 	case StrategyFundingDifferential:
 		pt.processDiffEntry(ev)
 	case StrategyFundingDiffExit:
@@ -67,11 +70,38 @@ func (pt *PositionTracker) processCarryEntry(ev execution.ExecutionEvent) {
 	}
 }
 
+func (pt *PositionTracker) processReverseCarryEntry(ev execution.ExecutionEvent) {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+
+	key := "reverse_carry:" + ev.Symbol + ":" + ev.Venue
+	tp, ok := pt.positions[key]
+	if !ok {
+		tp = &trackedPosition{
+			pos: OpenPosition{
+				Strategy: StrategyFundingCarryReverse,
+				Symbol:   ev.Symbol,
+				Venue:    ev.Venue,
+			},
+		}
+		pt.positions[key] = tp
+	}
+	tp.pos.NotionalUSD += ev.FilledNotionalUSD
+	if tp.pos.EntryRateBps == 0 {
+		tp.pos.EntryTsMs = ev.TsMs
+	}
+}
+
 func (pt *PositionTracker) processCarryExit(ev execution.ExecutionEvent) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	key := "carry:" + ev.Symbol + ":" + ev.Venue
+	// Derive key prefix from strategy type.
+	prefix := "carry:"
+	if ev.Strategy == StrategyFundingCarryReverseExit {
+		prefix = "reverse_carry:"
+	}
+	key := prefix + ev.Symbol + ":" + ev.Venue
 	tp, ok := pt.positions[key]
 	if !ok {
 		return
@@ -171,6 +201,8 @@ func (pt *PositionTracker) UpdateEntryRate(strategy, symbol, venue string, rateB
 	switch strategy {
 	case StrategyFundingCarry:
 		key = "carry:" + symbol + ":" + venue
+	case StrategyFundingCarryReverse:
+		key = "reverse_carry:" + symbol + ":" + venue
 	default:
 		return
 	}

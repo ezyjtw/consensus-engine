@@ -120,8 +120,8 @@ docker build -f Dockerfile.consensus-engine -t consensus-engine .
 ```
 Exchange WebSockets → market-data → Redis Stream (market:quotes)
     → consensus-engine → Redis Streams (consensus:updates, consensus:anomalies, consensus:status)
-        → arb-opportunity-engine → Redis Stream (trade:intents:pending)
-        → funding-engine → Redis Stream (trade:intents:pending)
+        → arb-opportunity-engine → Redis Stream (trade:intents)
+        → funding-engine → Redis Stream (trade:intents)
             → capital-allocator → Redis Stream (trade:intents:approved)
                 → execution-router → Redis Stream (execution:events, demo:fills)
     → risk-daemon (monitors all streams, can activate kill:switch)
@@ -137,7 +137,7 @@ Exchange WebSockets → market-data → Redis Stream (market:quotes)
 | `consensus:updates` | consensus-engine | arb-engine, funding-engine, dashboard |
 | `consensus:anomalies` | consensus-engine | risk-daemon, dashboard |
 | `consensus:status` | consensus-engine | ledger, dashboard |
-| `trade:intents:pending` | arb-engine, funding-engine | capital-allocator |
+| `trade:intents` | arb-engine, funding-engine | capital-allocator |
 | `trade:intents:approved` | capital-allocator | execution-router |
 | `execution:events` | execution-router | ledger, risk-daemon |
 | `risk:state` | risk-daemon | dashboard, ledger |

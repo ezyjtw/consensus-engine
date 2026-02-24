@@ -40,6 +40,10 @@ kelly_fraction: 0.25
 # Set to 0 to disable OI gating.
 baseline_oi: 50000
 
+# Redis stream for open interest updates (produced by market-data service).
+# Set to "" to disable OI-gated sizing.
+oi_stream: "market:open_interest"
+
 redis:
   addr: "localhost:6379"
   password: ""

@@ -21,6 +21,7 @@ type ArbRedisConfig struct {
 	UseTLS             bool
 	InputStream        string        // e.g. "consensus:updates"
 	MarketQuotesStream string        // e.g. "market:quotes" (for basis tracker)
+	OIStream           string        // e.g. "market:open_interest" (for cascade detector)
 	OutputIntents      string        // e.g. "trade:intents"
 	ConsumerGroup      string
 	ConsumerName       string
@@ -56,6 +57,15 @@ func NewArbBus(cfg ArbRedisConfig) (*ArbBus, error) {
 		if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
 			_ = rdb.Close()
 			return nil, fmt.Errorf("creating consumer group on %q: %w", cfg.MarketQuotesStream, err)
+		}
+	}
+	// Create consumer group for market:open_interest if cascade detection is configured.
+	if cfg.OIStream != "" {
+		oiGroup := cfg.ConsumerGroup + "-oi"
+		err = rdb.XGroupCreateMkStream(ctx, cfg.OIStream,
+			oiGroup, "$").Err()
+		if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+			log.Printf("arb bus: OI group on %q: %v (ok if stream not yet created)", cfg.OIStream, err)
 		}
 	}
 	return &ArbBus{rdb: rdb, cfg: cfg}, nil
@@ -137,6 +147,40 @@ func (b *ArbBus) ReadMarketQuotes(ctx context.Context) ([]consensus.Quote, error
 		}
 	}
 	return quotes, nil
+}
+
+// ReadOIUpdates reads open interest updates from the OI stream for cascade detection.
+// Returns raw JSON strings for the caller to parse.
+func (b *ArbBus) ReadOIUpdates(ctx context.Context) ([]string, error) {
+	if b.cfg.OIStream == "" {
+		return nil, nil
+	}
+	oiGroup := b.cfg.ConsumerGroup + "-oi"
+	streams, err := b.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group:    oiGroup,
+		Consumer: b.cfg.ConsumerName,
+		Streams:  []string{b.cfg.OIStream, ">"},
+		Count:    100,
+		Block:    100 * time.Millisecond,
+	}).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("XReadGroup (OI): %w", err)
+	}
+	var raws []string
+	for _, stream := range streams {
+		for _, msg := range stream.Messages {
+			raw, ok := msg.Values["data"].(string)
+			if !ok {
+				continue
+			}
+			raws = append(raws, raw)
+			_ = b.rdb.XAck(ctx, b.cfg.OIStream, oiGroup, msg.ID).Err()
+		}
+	}
+	return raws, nil
 }
 
 // PublishTradeIntent appends a TradeIntent to the output intents stream.
