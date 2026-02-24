@@ -323,6 +323,10 @@ func main() {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
+		if mode := bus.SystemMode(ctx); mode != "RUNNING" {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
 
 		updates, err := bus.ReadConsensusUpdates(ctx)
 		if err != nil {

@@ -62,6 +62,17 @@ func (e *Engine) RunDepositWatcher(ctx context.Context) {
 }
 
 func (e *Engine) pollDeposits(ctx context.Context) error {
+	// Check kill switch and system mode before any fund movements.
+	if e.bus.KillSwitchActive(ctx) {
+		log.Printf("treasury: kill switch active — skipping deposit poll")
+		return nil
+	}
+	mode := e.bus.SystemMode(ctx)
+	if mode != "RUNNING" {
+		log.Printf("treasury: system mode=%s — skipping deposit poll", mode)
+		return nil
+	}
+
 	ex, err := e.registry.Get(ctx, e.cfg.TreasuryVenue)
 	if err != nil {
 		return fmt.Errorf("getting treasury venue: %w", err)
@@ -328,6 +339,17 @@ func (e *Engine) RunSweep(ctx context.Context) {
 }
 
 func (e *Engine) executeSweep(ctx context.Context) {
+	// Check kill switch and system mode before sweeping funds.
+	if e.bus.KillSwitchActive(ctx) {
+		log.Printf("treasury: kill switch active — skipping sweep")
+		return
+	}
+	mode := e.bus.SystemMode(ctx)
+	if mode != "RUNNING" {
+		log.Printf("treasury: system mode=%s — skipping sweep", mode)
+		return
+	}
+
 	treasuryEx, err := e.registry.Get(ctx, e.cfg.TreasuryVenue)
 	if err != nil {
 		log.Printf("treasury: sweep: no treasury venue: %v", err)

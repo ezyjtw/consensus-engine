@@ -141,9 +141,12 @@ func main() {
                                 symbol: q.Symbol}] = true
                 }
 
-                // Skip compute+publish while the dashboard kill switch is active.
+                // Skip compute+publish when kill switch active or system halted.
                 if bus.KillSwitchActive(ctx) {
                         log.Println("kill switch active — skipping consensus compute")
+                        continue
+                }
+                if mode := bus.SystemMode(ctx); mode == "HALTED" {
                         continue
                 }
 

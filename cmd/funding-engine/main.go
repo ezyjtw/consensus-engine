@@ -126,6 +126,10 @@ func main() {
 				log.Println("funding-engine: kill switch active — skipping eval")
 				continue
 			}
+			if mode := bus.SystemMode(ctx); mode != "RUNNING" {
+				log.Printf("funding-engine: system mode=%s — skipping eval", mode)
+				continue
+			}
 
 			// Evaluate new entry opportunities.
 			intents := engine.Evaluate(tenantID)

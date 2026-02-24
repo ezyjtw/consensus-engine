@@ -119,6 +119,11 @@ func (b *FundingBus) KillSwitchActive(ctx context.Context) bool {
 	return b.sc.KillSwitchActive(ctx)
 }
 
+// SystemMode returns the current risk daemon mode.
+func (b *FundingBus) SystemMode(ctx context.Context) string {
+	return b.sc.SystemMode(ctx)
+}
+
 // Close releases the Redis connection.
 func (b *FundingBus) Close() error {
 	return b.sc.Close()
