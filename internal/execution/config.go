@@ -15,6 +15,12 @@ type Config struct {
 	MaxOrdersPerMinute int        `yaml:"max_orders_per_minute"`
 	TenantID           string     `yaml:"tenant_id"`
 	Redis              RedisConf  `yaml:"redis"`
+
+	// Live execution safety parameters.
+	MaxRetriesPerLeg  int     `yaml:"max_retries_per_leg"`   // max order retries per leg (default 3)
+	HedgeDriftMaxMs   int64   `yaml:"hedge_drift_max_ms"`    // max ms exposed before abort (default 5000)
+	MinPartialFillPct float64 `yaml:"min_partial_fill_pct"`  // min fill % to proceed with leg B (default 0.10)
+	ReconDelayMs      int64   `yaml:"recon_delay_ms"`        // delay before recon check (default 2000)
 }
 
 type RedisConf struct {
@@ -68,6 +74,18 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if c.TenantID == "" {
 		c.TenantID = "default"
+	}
+	if c.MaxRetriesPerLeg == 0 {
+		c.MaxRetriesPerLeg = 3
+	}
+	if c.HedgeDriftMaxMs == 0 {
+		c.HedgeDriftMaxMs = 5000
+	}
+	if c.MinPartialFillPct == 0 {
+		c.MinPartialFillPct = 0.10
+	}
+	if c.ReconDelayMs == 0 {
+		c.ReconDelayMs = 2000
 	}
 	return &c, nil
 }

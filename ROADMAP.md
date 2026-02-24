@@ -111,13 +111,11 @@ Market Data ✅ ──────────────────── mar
 
 ### 1.3 Remaining gaps before live trading
 
-1. **Live exchange connectors** — `PaperExecutor` is fully working; a `LiveExecutor` needs real REST/WS order placement, cancel/replace, post-only logic, and per-venue risk (tick size, min qty, reduce-only).
+1. **Live execution safety loop** — `LiveExecutor` now places real orders with IOC; still needs cancel/replace, post-only logic, partial fill recovery with second-leg adjustment, hedge drift enforcement, and fill reconciliation against exchange trade reports.
 
-2. **Fill reconciliation** — Live mode requires reconciling fills against exchange reports to detect partials, ADL impacts, and latency gaps.
+2. **Production WebSocket reconnect/sequencing** — `cmd/market-data` connects to exchanges; full production-grade reconnect + sequence-gap detection needed for mission-critical use.
 
-3. **Transfer Policy wiring into compose** — `internal/transfer` + `cmd/transfer-policy` exist and are fully implemented; they need a Dockerfile and entry in `docker-compose.yaml` plus dashboard transfer approval flow.
-
-4. **Production WebSocket reconnect/sequencing** — `cmd/market-data` connects to exchanges; full production-grade reconnect + sequence-gap detection needed for mission-critical use.
+3. ~~**Transfer Policy wiring into compose**~~ ✅ Done — `cmd/transfer-policy` + `cmd/liquidity-engine` both have Dockerfiles and entries in `docker-compose.yaml`. Dashboard transfer approval flow still needed.
 
 ---
 
@@ -904,8 +902,9 @@ Flatten sequence (always executed by Risk Daemon independently):
 | 10 | **Dashboard** (home view, risk cockpit, timeline, paper confidence) | ✅ Done — mobile-first redesign |
 
 **Remaining V1 work:**
-- Live exchange order placement (LiveExecutor) — REST/WS per venue
-- Fill reconciliation against exchange reports
+- ✅ Live exchange order placement (LiveExecutor) — real REST orders via exchange registry
+- ✅ Live execution safety: partial fill handling, hedge drift tracking, emergency unwind, fill reconciliation
+- ✅ Dashboard auth mandatory in non-dev environments
 - Production WebSocket reconnect + sequence validation
 
 ### V2 — Yield expansion + automation ✅ Started
@@ -914,7 +913,8 @@ Flatten sequence (always executed by Risk Daemon independently):
 - ✅ Transfer Policy Engine (allowlist, tamper detection, velocity limits)
 - ✅ Exchange incident safety (ADL risk, liquidation clusters, venue deleveraging)
 - ❌ Smarter execution: IOC/limit choice, depth-sensitive sequencing
-- ❌ Automated rebalances (transfer policy wired into compose + dashboard)
+- ✅ Transfer policy + liquidity engine wired into docker-compose
+- ❌ Automated rebalances (dashboard transfer approval flow)
 - ❌ Funding regime forecasting (OI + momentum model)
 - ❌ Prometheus + Grafana observability stack
 
@@ -939,20 +939,20 @@ All services present in `docker-compose.yaml`:
 
 ```yaml
 services:
-  redis:          ✅ Redis 7, streams enabled
-  postgres:       ✅ Postgres 16
-  market-data:    ✅ cmd/market-data
-  consensus:      ✅ cmd/consensus-engine
-  arb-engine:     ✅ cmd/arb-opportunity-engine
-  funding-engine: ✅ cmd/funding-engine
-  execution:      ✅ cmd/execution-router
-  risk-daemon:    ✅ cmd/risk-daemon
-  ledger:         ✅ cmd/ledger
-  paper-trader:   ✅ cmd/paper-trader
-  allocator:      ✅ cmd/capital-allocator
-  gateway:        ✅ cmd/dashboard (extends with gateway)
-  # TODO: transfer-policy  — cmd/transfer-policy not yet in compose
-  dashboard:      # cmd/dashboard             (Dockerfile exists)
+  redis:            ✅ Redis 7, streams enabled
+  postgres:         ✅ Postgres 16
+  market-data:      ✅ cmd/market-data
+  consensus:        ✅ cmd/consensus-engine
+  arb-engine:       ✅ cmd/arb-opportunity-engine
+  funding-engine:   ✅ cmd/funding-engine
+  execution:        ✅ cmd/execution-router
+  risk-daemon:      ✅ cmd/risk-daemon
+  ledger:           ✅ cmd/ledger
+  allocator:        ✅ cmd/capital-allocator
+  treasury:         ✅ cmd/treasury
+  liquidity-engine: ✅ cmd/liquidity-engine
+  transfer-policy:  ✅ cmd/transfer-policy
+  dashboard:        ✅ cmd/dashboard (+ Gateway API)
 ```
 
 ### Environment separation

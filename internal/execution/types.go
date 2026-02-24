@@ -4,7 +4,7 @@ import "github.com/ezyjtw/consensus-engine/internal/arb"
 
 // ExecutionEvent is emitted for every order lifecycle transition.
 type ExecutionEvent struct {
-	EventType            string  `json:"event_type"`             // ORDER_FILLED | ORDER_REJECTED | HEDGE_FAILED | LEG_PARTIAL
+	EventType            string  `json:"event_type"`             // ORDER_FILLED | ORDER_REJECTED | HEDGE_FAILED | LEG_PARTIAL | HEDGE_DRIFT
 	IntentID             string  `json:"intent_id"`
 	LegIndex             int     `json:"leg_index"`
 	Venue                string  `json:"venue"`
