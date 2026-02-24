@@ -2,8 +2,18 @@ per_strategy_max_usd:
   CROSS_VENUE_ARB: 100000
   FUNDING_CARRY: 200000
   FUNDING_DIFFERENTIAL: 150000
+  FUNDING_CARRY_REVERSE: 100000
   SPREAD_CAPTURE: 50000
   LIQUIDATION_CONTRA: 25000
+  BASIS_CONVERGENCE: 75000
+  CASCADE_CONTRA: 25000
+  CORRELATION_BREAK: 50000
+  DEX_CEX_ARB: 50000
+  L2_BRIDGE_ARB: 25000
+  # Exit strategies inherit from their parent strategy caps.
+  FUNDING_CARRY_EXIT: 200000
+  FUNDING_DIFFERENTIAL_EXIT: 150000
+  FUNDING_CARRY_REVERSE_EXIT: 100000
 
 per_venue_max_usd:
   binance: 200000
@@ -25,6 +35,10 @@ min_quality_for_liquidity: HIGH
 # 0.5   = half-Kelly: moderate, for established strategies with proven edge
 # See: https://en.wikipedia.org/wiki/Kelly_criterion
 kelly_fraction: 0.25
+
+# OI-gated position sizing baseline. When current OI < baseline, sizes are reduced.
+# Set to 0 to disable OI gating.
+baseline_oi: 50000
 
 redis:
   addr: "localhost:6379"

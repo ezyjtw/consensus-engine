@@ -32,6 +32,18 @@ func main() {
 
 	engine := allocator.NewEngine(policy)
 
+	// ── OI-gated position sizing ─────────────────────────────────────────
+	oiTracker := allocator.NewOITracker()
+	engine.OITracker = oiTracker
+	if policy.BaselineOI > 0 {
+		log.Printf("capital-allocator: OI gating enabled baseline=%.0f", policy.BaselineOI)
+	}
+
+	// ── Dynamic allocation ───────────────────────────────────────────────
+	dynAlloc := allocator.NewDynamicAllocator(policy.PerStrategyMaxUSD)
+	engine.DynAlloc = dynAlloc
+	log.Println("capital-allocator: dynamic allocation enabled")
+
 	bus, err := eventbus.NewAllocatorBus(eventbus.AllocatorBusConfig{
 		Addr:          policy.Redis.Addr,
 		Password:      policy.Redis.Password,
@@ -56,6 +68,11 @@ func main() {
 	statsTicker := time.NewTicker(30 * time.Second)
 	defer statsTicker.Stop()
 
+	// Decay recent P&L every 5 minutes to prevent stale performance from
+	// dominating dynamic allocation decisions.
+	decayTicker := time.NewTicker(5 * time.Minute)
+	defer decayTicker.Stop()
+
 	log.Println("capital-allocator: started")
 
 	for {
@@ -66,6 +83,17 @@ func main() {
 		case <-statsTicker.C:
 			log.Printf("capital-allocator: approved=%d rejected=%v",
 				engine.Approved, engine.Rejected)
+			// Log OI summary.
+			oiTracker.LogSummary()
+			// Log dynamic allocator snapshot.
+			for _, sp := range dynAlloc.Snapshot() {
+				if sp.FillCount > 0 {
+					log.Printf("capital-allocator: dyn strategy=%s fills=%d win_rate=%.0f%% recent_pnl=$%.2f",
+						sp.Strategy, sp.FillCount, float64(sp.WinCount)/float64(sp.FillCount)*100, sp.RecentPnL)
+				}
+			}
+		case <-decayTicker.C:
+			dynAlloc.DecayRecentPnL(0.9) // 10% decay every 5 minutes
 		default:
 		}
 
@@ -95,6 +123,8 @@ func main() {
 				log.Printf("capital-allocator: released %.2f USD notional for strategy=%s",
 					totalNotional, f.Strategy)
 			}
+			// Feed the dynamic allocator with P&L data.
+			dynAlloc.RecordFill(f.Strategy, f.NetPnLUSD)
 		}
 
 		// ── Evaluate new intents ──────────────────────────────────────────

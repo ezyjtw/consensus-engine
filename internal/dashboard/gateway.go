@@ -91,6 +91,9 @@ func (s *Server) RegisterGateway(gw *Gateway) {
 	s.mux.HandleFunc("GET /api/timeline", s.auth(gw.handleTimeline))
 	s.mux.HandleFunc("GET /api/paper/confidence", s.auth(gw.handlePaperConfidence))
 
+	// ── V3: Strategy state ───────────────────────────────────────────────
+	s.mux.HandleFunc("GET /api/strategies", s.auth(gw.handleGetStrategies))
+
 	// Health (public)
 	s.mux.HandleFunc("GET /api/health", gw.handleHealth)
 }
@@ -958,6 +961,47 @@ func (gw *Gateway) handlePaperConfidence(w http.ResponseWriter, r *http.Request)
 			"min_score_for_live":   80,
 		},
 	})
+}
+
+// ── Strategy state ─────────────────────────────────────────────────────
+
+// handleGetStrategies returns a summary of all active strategies, their recent
+// intent counts, and latest activity from Redis streams.
+func (gw *Gateway) handleGetStrategies(w http.ResponseWriter, r *http.Request) {
+	strategies := []string{
+		"CROSS_VENUE_ARB", "BASIS_CONVERGENCE",
+		"FUNDING_CARRY", "FUNDING_DIFFERENTIAL", "FUNDING_CARRY_REVERSE",
+		"CASCADE_CONTRA", "CORRELATION_BREAK",
+		"DEX_CEX_ARB", "L2_BRIDGE_ARB",
+		"SPREAD_CAPTURE", "LIQUIDATION_CONTRA",
+	}
+
+	// Count recent intents per strategy from trade:intents stream.
+	intentCounts := make(map[string]int)
+	msgs, err := gw.rdb.XRevRangeN(r.Context(), "trade:intents:approved", "+", "-", 200).Result()
+	if err == nil {
+		for _, m := range msgs {
+			raw, ok := m.Values["data"].(string)
+			if !ok {
+				continue
+			}
+			var intent map[string]interface{}
+			if json.Unmarshal([]byte(raw), &intent) == nil {
+				if strat, ok := intent["strategy"].(string); ok {
+					intentCounts[strat]++
+				}
+			}
+		}
+	}
+
+	var result []map[string]interface{}
+	for _, s := range strategies {
+		result = append(result, map[string]interface{}{
+			"strategy":     s,
+			"recent_intents": intentCounts[s],
+		})
+	}
+	jsonOK(w, result)
 }
 
 func clamp(v, lo, hi float64) float64 {

@@ -26,6 +26,9 @@ type Engine struct {
 	venueDeployed map[string]float64
 	Approved      int
 	Rejected      map[string]int
+	// Optional: OI-gated position sizing and dynamic allocation.
+	OITracker  *OITracker
+	DynAlloc   *DynamicAllocator
 }
 
 func NewEngine(p *Policy) *Engine {
@@ -65,6 +68,21 @@ func (e *Engine) Evaluate(intent arb.TradeIntent, systemMode, consensusQuality s
 	}
 	if stratCap == 0 {
 		return e.reject(intent, "strategy_not_configured")
+	}
+
+	// Dynamic allocation: adjust cap based on strategy performance.
+	if e.DynAlloc != nil {
+		dynCap := e.DynAlloc.AdjustedCap(intent.Strategy)
+		if dynCap > 0 && dynCap < stratCap {
+			stratCap = dynCap
+		}
+	}
+
+	// OI-gated sizing: scale down intent notional based on market liquidity.
+	oiMultiplier := 1.0
+	if e.OITracker != nil && len(intent.Legs) > 0 {
+		venue := intent.Legs[0].Venue
+		oiMultiplier = e.OITracker.LiquidityMultiplier(venue, intent.Symbol, e.policy.BaselineOI)
 	}
 	// Gate 4b: per-position concentration limit.
 	if e.policy.MaxSingleIntentPct > 0 {
@@ -109,6 +127,9 @@ func (e *Engine) Evaluate(intent arb.TradeIntent, systemMode, consensusQuality s
 			}
 		}
 	}
+
+	// Apply OI liquidity multiplier to scale factor.
+	scaleFactor *= oiMultiplier
 
 	if scaleFactor < 0.1 {
 		return e.reject(intent, "insufficient_available_notional")
@@ -175,11 +196,12 @@ func (e *Engine) reject(intent arb.TradeIntent, reason string) Outcome {
 
 func (e *Engine) minQualityForStrategy(strategy string) string {
 	switch strategy {
-	case "CROSS_VENUE_ARB":
+	case "CROSS_VENUE_ARB", "BASIS_CONVERGENCE", "DEX_CEX_ARB", "L2_BRIDGE_ARB":
 		return e.policy.MinQualityForArb
-	case "FUNDING_CARRY", "FUNDING_DIFFERENTIAL":
+	case "FUNDING_CARRY", "FUNDING_DIFFERENTIAL", "FUNDING_CARRY_REVERSE",
+		"FUNDING_CARRY_EXIT", "FUNDING_DIFFERENTIAL_EXIT", "FUNDING_CARRY_REVERSE_EXIT":
 		return e.policy.MinQualityForFunding
-	case "SPREAD_CAPTURE", "LIQUIDATION_CONTRA":
+	case "SPREAD_CAPTURE", "LIQUIDATION_CONTRA", "CASCADE_CONTRA", "CORRELATION_BREAK":
 		return e.policy.MinQualityForLiquidity
 	default:
 		return "HIGH"

@@ -22,6 +22,9 @@ type Policy struct {
 	IgnoreFlaggedVenues bool                  `yaml:"ignore_flagged_venues"`
 	EnabledPairs        map[string][][]string `yaml:"enabled_pairs"`
 	BasisTrade          BasisTradePolicy      `yaml:"basis_trade"`
+	Cascade             CascadeConfig         `yaml:"cascade"`
+	Correlation         CorrelationConfig     `yaml:"correlation"`
+	DEXCEX              DEXCEXConfig          `yaml:"dex_cex"`
 	Redis               ArbRedisPolicy        `yaml:"redis"`
 }
 

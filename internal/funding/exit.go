@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	StrategyFundingCarryExit = "FUNDING_CARRY_EXIT"
-	StrategyFundingDiffExit  = "FUNDING_DIFFERENTIAL_EXIT"
+	StrategyFundingCarryExit        = "FUNDING_CARRY_EXIT"
+	StrategyFundingDiffExit         = "FUNDING_DIFFERENTIAL_EXIT"
+	StrategyFundingCarryReverseExit = "FUNDING_CARRY_REVERSE_EXIT"
 )
 
 // ExitReason describes why an exit signal was generated.
@@ -54,6 +55,10 @@ func (e *Engine) EvaluateExits(tenantID string, positions []OpenPosition) []arb.
 			}
 		case StrategyFundingDifferential:
 			if intent := e.evaluateDiffExit(tenantID, pos, now, nowMs); intent != nil {
+				intents = append(intents, *intent)
+			}
+		case StrategyFundingCarryReverse:
+			if intent := e.evaluateReverseCarryExit(tenantID, pos, now, nowMs); intent != nil {
 				intents = append(intents, *intent)
 			}
 		}
@@ -224,6 +229,87 @@ func (e *Engine) evaluateDiffExit(tenantID string, pos OpenPosition, now time.Ti
 			MaxAgeMs:        e.policy.IntentTTLMs,
 			HedgePreference: "SIMULTANEOUS_OR_HEDGE_FIRST",
 			CooldownKey:     fmt.Sprintf("exit:diff:%s:%s:%s", pos.Symbol, pos.LongVenue, pos.ShortVenue),
+		},
+	}
+}
+
+func (e *Engine) evaluateReverseCarryExit(tenantID string, pos OpenPosition, now time.Time, nowMs int64) *arb.TradeIntent {
+	venueMap, ok := e.state[pos.Symbol]
+	if !ok {
+		return nil
+	}
+	d, ok := venueMap[pos.Venue]
+	if !ok {
+		return nil
+	}
+
+	var reason ExitReason
+
+	// Check 1: Funding rate flipped positive — no longer collecting as long-perp holder.
+	if pos.EntryRateBps < 0 && d.fundingRate > 0 {
+		reason = ExitFundingInverted
+	}
+
+	// Check 2: Regime went VOLATILE.
+	if reason == "" {
+		if r := e.forecaster.Get(pos.Venue, pos.Symbol); r != nil && r.Label == "VOLATILE" {
+			reason = ExitRegimeVolatile
+		}
+	}
+
+	// Check 3: Volatility spike.
+	if reason == "" && e.volTracker != nil && e.policy.VolatilityGate.VolThresholdPct > 0 {
+		vol := e.volTracker.RealizedVol(pos.Venue, pos.Symbol)
+		if vol > e.policy.VolatilityGate.VolThresholdPct {
+			reason = ExitVolatilitySpike
+		}
+	}
+
+	if reason == "" {
+		return nil
+	}
+
+	log.Printf("funding: REVERSE CARRY EXIT signal sym=%s venue=%s reason=%s rate=%.6f",
+		pos.Symbol, pos.Venue, reason, d.fundingRate)
+	e.Emitted[StrategyFundingCarryReverseExit]++
+
+	// Unwind reverse carry: buy spot back + sell-to-close perp long.
+	return &arb.TradeIntent{
+		TenantID:  tenantID,
+		IntentID:  newUUID(),
+		Strategy:  StrategyFundingCarryReverseExit,
+		Symbol:    pos.Symbol,
+		TsMs:      nowMs,
+		ExpiresMs: nowMs + e.policy.IntentTTLMs,
+		Legs: []arb.TradeLeg{
+			{
+				Venue:          pos.Venue,
+				Action:         "BUY",
+				Market:         "SPOT",
+				Type:           "MARKET_OR_IOC",
+				NotionalUSD:    pos.NotionalUSD,
+				MaxSlippageBps: e.policy.MaxSlippageBps,
+				PriceLimit:     d.markPrice * 1.005,
+			},
+			{
+				Venue:          pos.Venue,
+				Action:         "SELL",
+				Market:         "PERP",
+				Type:           "MARKET_OR_IOC",
+				NotionalUSD:    pos.NotionalUSD,
+				MaxSlippageBps: e.policy.MaxSlippageBps,
+				PriceLimit:     d.markPrice * 0.995,
+			},
+		},
+		Expected: arb.ExpectedMetrics{
+			EdgeBpsNet: 0,
+		},
+		Constraints: arb.IntentConstraints{
+			MinQuality:      "LOW",
+			RequireVenueOK:  false,
+			MaxAgeMs:        e.policy.IntentTTLMs,
+			HedgePreference: "SIMULTANEOUS_OR_HEDGE_FIRST",
+			CooldownKey:     fmt.Sprintf("exit:reverse_carry:%s:%s", pos.Symbol, pos.Venue),
 		},
 	}
 }
