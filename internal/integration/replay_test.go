@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -11,12 +12,6 @@ import (
 	"github.com/ezyjtw/consensus-engine/internal/consensus"
 	"github.com/ezyjtw/consensus-engine/internal/execution"
 )
-
-// recordedQuote is a timestamped quote for replay.
-type recordedQuote struct {
-	offsetMs int64
-	quote    consensus.Quote
-}
 
 // makeReplayQuote creates a quote for replay testing.
 func makeReplayQuote(venue consensus.Venue, symbol consensus.Symbol, mid, spread float64, tsMs int64) consensus.Quote {
@@ -218,7 +213,7 @@ func TestReplayPaperExecution(t *testing.T) {
 	}
 
 	pe := execution.NewPaperExecutor(cfg, cache)
-	events, fill := pe.Execute(nil, intent)
+	events, fill := pe.Execute(context.Background(), intent)
 
 	// Verify we got fill events for both legs.
 	if len(events) != 2 {
@@ -246,11 +241,9 @@ func TestReplayPaperExecution(t *testing.T) {
 		t.Error("fill prices should be non-zero")
 	}
 
-	// Verify schema version propagation through events.
-	if fill.SchemaVersion != 0 {
-		// Schema version is set at publish boundary, not construction — 0 is expected here.
-		// This verifies the struct has the field.
-	}
+	// Schema version is set at publish boundary, not construction — 0 is expected here.
+	// This verifies the struct has the field.
+	_ = fill.SchemaVersion
 }
 
 // TestReplayVenueBlacklistPropagates verifies that when a venue is blacklisted
