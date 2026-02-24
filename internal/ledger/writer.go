@@ -366,3 +366,36 @@ func (db *DB) PnLAttributionByStrategy(ctx context.Context, tenantID string) ([]
 }
 
 // Note: ExportFills and ExportAuditLog are defined in auth.go.
+
+// ── UK Tax export ────────────────────────────────────────────────────────
+
+// ExportTradesForTax returns individual filled trade legs from the orders
+// table for a date range, extracting key fields from the JSONB payload.
+// Each row represents a single BUY or SELL execution suitable for UK tax computation.
+func (db *DB) ExportTradesForTax(ctx context.Context, tenantID string, from, to time.Time, limit int) ([]map[string]interface{}, error) {
+	rows, err := db.pool.Query(ctx,
+		`SELECT id::text,
+		        intent_id::text,
+		        venue,
+		        symbol,
+		        action,
+		        COALESCE((payload->>'filled_price')::double precision, 0)        AS filled_price,
+		        COALESCE((payload->>'filled_notional_usd')::double precision, 0) AS filled_notional_usd,
+		        COALESCE((payload->>'fees_usd_actual')::double precision, 0)     AS fees_usd,
+		        COALESCE(payload->>'market', 'SPOT')                             AS market,
+		        COALESCE(payload->>'strategy', '')                               AS strategy,
+		        ts
+		 FROM orders
+		 WHERE tenant_id = $1
+		   AND status = 'ORDER_FILLED'
+		   AND ts >= $2
+		   AND ts <= $3
+		 ORDER BY ts ASC
+		 LIMIT $4`,
+		tenantID, from, to, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows), nil
+}

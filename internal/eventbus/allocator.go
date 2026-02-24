@@ -156,6 +156,12 @@ func (b *AllocatorBus) KillSwitchActive(ctx context.Context) bool {
 	return b.sc.KillSwitchActive(ctx)
 }
 
+// PublishEquity writes the paper-mode equity snapshot to a Redis key for the dashboard.
+// The addr parameter is unused (kept for interface flexibility); the bus uses its own connection.
+func (b *AllocatorBus) PublishEquity(ctx context.Context, _ string, snapJSON string) {
+	_ = b.sc.SetString(ctx, "paper:equity", snapJSON, 0)
+}
+
 // Close releases the Redis connection.
 func (b *AllocatorBus) Close() error {
 	return b.sc.Close()

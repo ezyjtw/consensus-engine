@@ -52,10 +52,16 @@ func (pc *PriceCache) Mid(symbol string) (float64, bool) {
 	return v, ok
 }
 
+// PositionWriter is an optional interface for persisting paper positions to Redis.
+type PositionWriter interface {
+	WritePosition(ctx context.Context, tenantID, key string, pos map[string]float64)
+}
+
 // PaperExecutor simulates order fills without touching real exchange APIs.
 type PaperExecutor struct {
 	cfg        *Config
 	priceCache *PriceCache
+	posWriter  PositionWriter // optional; nil = no persistence
 	// positions: "venue:symbol:market" → *posEntry
 	positions sync.Map
 	// orderTs tracks recent order timestamps for rate limiting.
@@ -65,6 +71,11 @@ type PaperExecutor struct {
 
 func NewPaperExecutor(cfg *Config, cache *PriceCache) *PaperExecutor {
 	return &PaperExecutor{cfg: cfg, priceCache: cache}
+}
+
+// SetPositionWriter enables Redis position persistence.
+func (e *PaperExecutor) SetPositionWriter(pw PositionWriter) {
+	e.posWriter = pw
 }
 
 // Execute simulates the fill of all legs in an approved intent.
@@ -267,7 +278,17 @@ func (e *PaperExecutor) updatePosition(key string, qty, price, notional float64)
 	if pos.qty != 0 {
 		pos.entryPrice = price
 	}
+	snapshot := map[string]float64{
+		"qty":         pos.qty,
+		"entry_price": pos.entryPrice,
+		"notional":    pos.notional,
+	}
 	pos.mu.Unlock()
+
+	// Persist to Redis so the dashboard can display positions and they survive restarts.
+	if e.posWriter != nil {
+		e.posWriter.WritePosition(context.Background(), e.cfg.TenantID, key, snapshot)
+	}
 }
 
 // PositionJSON returns all current virtual positions as a serialisable map.

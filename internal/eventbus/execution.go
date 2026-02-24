@@ -124,6 +124,17 @@ func (b *ExecutionBus) SystemMode(ctx context.Context) string {
 	return mode
 }
 
+// WritePosition persists a paper position to a Redis key for the dashboard.
+// Implements execution.PositionWriter.
+func (b *ExecutionBus) WritePosition(ctx context.Context, tenantID, key string, pos map[string]float64) {
+	redisKey := fmt.Sprintf("paper:pos:%s:%s", tenantID, key)
+	data, err := json.Marshal(pos)
+	if err != nil {
+		return
+	}
+	_ = b.sc.SetString(ctx, redisKey, string(data), 0)
+}
+
 // Close releases the Redis connection.
 func (b *ExecutionBus) Close() error {
 	return b.sc.Close()
