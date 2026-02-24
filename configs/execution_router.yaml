@@ -42,6 +42,18 @@ venue_profiles:
     fee_bps_taker: 3.0
     partial_fill_pct: 0.10
 
+# Live execution safety.
+max_retries_per_leg: 3
+hedge_drift_max_ms: 5000
+min_partial_fill_pct: 0.10
+recon_delay_ms: 2000
+
+# Micro-live graduation caps — hard limits during initial live period.
+# Raise these as confidence in live execution grows.
+live_max_order_notional_usd: 10000   # $10k per leg
+live_max_daily_notional_usd: 100000  # $100k rolling 24h
+live_max_open_orders: 4              # max concurrent orders
+
 tenant_id: "default"
 
 redis:

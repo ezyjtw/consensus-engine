@@ -56,6 +56,58 @@ func main() {
 		_ = json.NewEncoder(w).Encode(decision)
 	})
 
+	// GET /pending — list pending transfers awaiting approval.
+	mux.HandleFunc("GET /pending", func(w http.ResponseWriter, r *http.Request) {
+		pending := engine.ListPending()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(pending)
+	})
+
+	// POST /approve — approve a pending transfer.
+	mux.HandleFunc("POST /approve", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			RequestID  string `json:"request_id"`
+			ApprovedBy string `json:"approved_by"`
+			Comment    string `json:"comment"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
+			return
+		}
+		if req.RequestID == "" || req.ApprovedBy == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "request_id and approved_by required"})
+			return
+		}
+		decision, fullyApproved := engine.Approve(req.RequestID, req.ApprovedBy, req.Comment)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"decision":       decision,
+			"fully_approved": fullyApproved,
+		})
+	})
+
+	// POST /deny — deny a pending transfer.
+	mux.HandleFunc("POST /deny", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			RequestID string `json:"request_id"`
+			DeniedBy  string `json:"denied_by"`
+			Reason    string `json:"reason"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
+			return
+		}
+		decision := engine.DenyPending(req.RequestID, req.DeniedBy, req.Reason)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(decision)
+	})
+
 	// GET /health — liveness probe.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

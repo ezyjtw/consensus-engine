@@ -23,10 +23,17 @@ type Config struct {
 	Allowlist []AllowlistEntry `yaml:"allowlist"`
 
 	// Velocity limits.
-	MaxPerTransferUSD float64 `yaml:"max_per_transfer_usd"` // hard cap per tx
-	MaxDailyUSD       float64 `yaml:"max_daily_usd"`        // rolling 24h cap
-	MaxTransfersPerDay int    `yaml:"max_transfers_per_day"`
-	NewAddressCooloffH int    `yaml:"new_address_cooloff_hours"` // hours before a new address can receive
+	MaxPerTransferUSD  float64 `yaml:"max_per_transfer_usd"` // hard cap per tx
+	MaxDailyUSD        float64 `yaml:"max_daily_usd"`        // rolling 24h cap
+	MaxTransfersPerDay int     `yaml:"max_transfers_per_day"`
+	NewAddressCooloffH int     `yaml:"new_address_cooloff_hours"` // hours before a new address can receive
+
+	// Dual approval: transfers above this threshold require 2 approvals from different operators.
+	DualApprovalThresholdUSD float64 `yaml:"dual_approval_threshold_usd"` // 0 = all transfers single-approval
+	ApprovalExpiryH          int     `yaml:"approval_expiry_hours"`       // hours before pending transfers auto-deny (default 24)
+
+	// Region constraints: venue-to-region mapping for jurisdiction enforcement.
+	VenueRegions []VenueRegion `yaml:"venue_regions"`
 
 	// configHash holds the SHA-256 of the raw YAML at load time.
 	// Used for tamper detection — recomputed and compared before each check.

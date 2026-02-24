@@ -32,6 +32,11 @@ type Config struct {
 	HedgeDriftMaxMs   int64   `yaml:"hedge_drift_max_ms"`    // max ms exposed before abort (default 5000)
 	MinPartialFillPct float64 `yaml:"min_partial_fill_pct"`  // min fill % to proceed with leg B (default 0.10)
 	ReconDelayMs      int64   `yaml:"recon_delay_ms"`        // delay before recon check (default 2000)
+
+	// Micro-live graduation caps — hard limits during initial live period.
+	LiveMaxOrderNotionalUSD float64 `yaml:"live_max_order_notional_usd"` // per-order cap (default 10000)
+	LiveMaxDailyNotionalUSD float64 `yaml:"live_max_daily_notional_usd"` // rolling 24h cap (default 100000)
+	LiveMaxOpenOrders       int     `yaml:"live_max_open_orders"`        // concurrent order cap (default 4)
 }
 
 type RedisConf struct {
@@ -97,6 +102,15 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if c.ReconDelayMs == 0 {
 		c.ReconDelayMs = 2000
+	}
+	if c.LiveMaxOrderNotionalUSD == 0 {
+		c.LiveMaxOrderNotionalUSD = 10000 // $10k per order — conservative micro-live cap
+	}
+	if c.LiveMaxDailyNotionalUSD == 0 {
+		c.LiveMaxDailyNotionalUSD = 100000 // $100k rolling 24h — conservative micro-live cap
+	}
+	if c.LiveMaxOpenOrders == 0 {
+		c.LiveMaxOpenOrders = 4
 	}
 	if c.VenueProfiles == nil {
 		c.VenueProfiles = defaultVenueProfiles()

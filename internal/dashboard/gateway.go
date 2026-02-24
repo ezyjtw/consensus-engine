@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -492,7 +493,8 @@ func (gw *Gateway) handleGetPaperMode(w http.ResponseWriter, r *http.Request) {
 
 func (gw *Gateway) handleSetPaperMode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Mode string `json:"mode"`
+		Mode  string `json:"mode"`
+		Force bool   `json:"force"` // admin override — skip graduation checks
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonErr(w, "invalid JSON", http.StatusBadRequest)
@@ -502,11 +504,118 @@ func (gw *Gateway) handleSetPaperMode(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "mode must be PAPER, SHADOW, or LIVE", http.StatusBadRequest)
 		return
 	}
-	if err := gw.rdb.Set(r.Context(), "trading:mode", req.Mode, 0).Err(); err != nil {
+
+	ctx := r.Context()
+	currentMode := gw.rdb.Get(ctx, "trading:mode").Val()
+	if currentMode == "" {
+		currentMode = "PAPER"
+	}
+
+	// Graduation guardrails: enforce confidence thresholds before mode upgrade.
+	// Downgrades (e.g. LIVE→PAPER) are always allowed.
+	// Admin override via force=true bypasses checks.
+	isUpgrade := modeRank(req.Mode) > modeRank(currentMode)
+	if isUpgrade && !req.Force {
+		score, fillCount, err := gw.computeConfidence(ctx)
+		if err != nil {
+			jsonErr(w, fmt.Sprintf("cannot evaluate graduation: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		minFills := int64(50)
+		switch req.Mode {
+		case "SHADOW":
+			if score < 50 {
+				jsonErr(w, fmt.Sprintf(
+					"confidence score %.0f < 50 required for SHADOW (use force=true to override)", score),
+					http.StatusPreconditionFailed)
+				return
+			}
+			if fillCount < minFills {
+				jsonErr(w, fmt.Sprintf(
+					"fill count %d < %d minimum for SHADOW graduation", fillCount, minFills),
+					http.StatusPreconditionFailed)
+				return
+			}
+		case "LIVE":
+			if score < 80 {
+				jsonErr(w, fmt.Sprintf(
+					"confidence score %.0f < 80 required for LIVE (use force=true to override)", score),
+					http.StatusPreconditionFailed)
+				return
+			}
+			if fillCount < 200 {
+				jsonErr(w, fmt.Sprintf(
+					"fill count %d < 200 minimum for LIVE graduation", fillCount),
+					http.StatusPreconditionFailed)
+				return
+			}
+		}
+	}
+
+	if err := gw.rdb.Set(ctx, "trading:mode", req.Mode, 0).Err(); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonOK(w, map[string]string{"status": "updated", "mode": req.Mode})
+
+	// Audit log the mode transition.
+	gw.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: "audit:mode_transitions",
+		Values: map[string]interface{}{
+			"from":      currentMode,
+			"to":        req.Mode,
+			"forced":    req.Force,
+			"tenant_id": gw.tenantID,
+			"ts_ms":     time.Now().UnixMilli(),
+		},
+	})
+
+	jsonOK(w, map[string]interface{}{
+		"status":    "updated",
+		"mode":      req.Mode,
+		"from":      currentMode,
+		"forced":    req.Force,
+		"tenant_id": gw.tenantID,
+	})
+}
+
+// computeConfidence returns the composite confidence score and fill count.
+// Extracted from handlePaperConfidence for reuse in graduation checks.
+func (gw *Gateway) computeConfidence(ctx context.Context) (score float64, fillCount int64, err error) {
+	if gw.db == nil {
+		return 0, 0, fmt.Errorf("postgres not connected — confidence requires KPI data")
+	}
+	kpi, err := gw.db.KPISummary(ctx, gw.tenantID)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	fillCount, _ = kpi["fill_count"].(int64)
+	winRate, _ := kpi["win_rate_pct"].(float64)
+	sharpe, _ := kpi["sharpe_proxy"].(float64)
+	avgSlippage, _ := kpi["avg_slippage_bps"].(float64)
+
+	fillScore := clamp(float64(fillCount)/2.0, 0, 100)
+	winScore := clamp((winRate-50)/20*100, 0, 100)
+	sharpeScore := clamp(sharpe/2*100, 0, 100)
+	slippageScore := clamp(100-avgSlippage*10, 0, 100)
+
+	score = (fillScore + winScore + sharpeScore + slippageScore) / 4
+	return score, fillCount, nil
+}
+
+// modeRank returns the ordinal rank of a trading mode for upgrade detection.
+func modeRank(mode string) int {
+	switch mode {
+	case "PAPER":
+		return 0
+	case "SHADOW":
+		return 1
+	case "LIVE":
+		return 2
+	default:
+		return -1
+	}
 }
 
 // ── KPI ───────────────────────────────────────────────────────────────────
@@ -921,45 +1030,49 @@ func (gw *Gateway) handlePaperConfidence(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	kpi, err := gw.db.KPISummary(r.Context(), gw.tenantID)
+	score, fillCount, err := gw.computeConfidence(r.Context())
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	fillCount, _ := kpi["fill_count"].(int64)
+	// Fetch sub-scores for the detailed response.
+	kpi, _ := gw.db.KPISummary(r.Context(), gw.tenantID)
 	winRate, _ := kpi["win_rate_pct"].(float64)
 	sharpe, _ := kpi["sharpe_proxy"].(float64)
 	avgSlippage, _ := kpi["avg_slippage_bps"].(float64)
 
-	// Sub-scores (each 0–100).
-	// Fill volume: ramp from 0 at 0 fills to 100 at 200+ fills.
 	fillScore := clamp(float64(fillCount)/2.0, 0, 100)
-	// Win rate: 50% baseline = 50 pts, 70% = 100 pts.
 	winScore := clamp((winRate-50)/20*100, 0, 100)
-	// Sharpe proxy: 0 at ≤0, 100 at ≥2.
 	sharpeScore := clamp(sharpe/2*100, 0, 100)
-	// Slippage discipline: 100 at 0 bps, 0 at ≥10 bps.
 	slippageScore := clamp(100-avgSlippage*10, 0, 100)
 
-	composite := (fillScore + winScore + sharpeScore + slippageScore) / 4
+	currentMode := gw.rdb.Get(r.Context(), "trading:mode").Val()
+	if currentMode == "" {
+		currentMode = "PAPER"
+	}
 
 	jsonOK(w, map[string]interface{}{
-		"score":   fmt.Sprintf("%.0f", composite),
+		"score":        fmt.Sprintf("%.0f", score),
+		"current_mode": currentMode,
 		"details": map[string]interface{}{
-			"fill_volume_score":    fillScore,
-			"win_rate_score":       winScore,
-			"sharpe_score":         sharpeScore,
-			"slippage_discipline":  slippageScore,
-			"fill_count":           fillCount,
-			"win_rate_pct":         winRate,
-			"sharpe_proxy":         sharpe,
-			"avg_slippage_bps":     avgSlippage,
+			"fill_volume_score":   fillScore,
+			"win_rate_score":      winScore,
+			"sharpe_score":        sharpeScore,
+			"slippage_discipline": slippageScore,
+			"fill_count":          fillCount,
+			"win_rate_pct":        winRate,
+			"sharpe_proxy":        sharpe,
+			"avg_slippage_bps":    avgSlippage,
 		},
 		"thresholds": map[string]interface{}{
 			"min_score_for_shadow": 50,
+			"min_fills_for_shadow": 50,
 			"min_score_for_live":   80,
+			"min_fills_for_live":   200,
 		},
+		"eligible_for_shadow": score >= 50 && fillCount >= 50,
+		"eligible_for_live":   score >= 80 && fillCount >= 200,
 	})
 }
 

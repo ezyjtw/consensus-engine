@@ -54,4 +54,30 @@ type Alert struct {
 	Metric    string  `json:"metric,omitempty"`
 	Value     float64 `json:"value,omitempty"`
 	Threshold float64 `json:"threshold,omitempty"`
+	Playbook  string  `json:"playbook,omitempty"` // incident playbook name, if triggered
+}
+
+// ── Incident playbooks ──────────────────────────────────────────────────
+
+// PlaybookName identifies a structured incident response pattern.
+type PlaybookName string
+
+const (
+	PlaybookVenueMaintenance PlaybookName = "VENUE_MAINTENANCE"
+	PlaybookVolatilitySpike  PlaybookName = "VOLATILITY_SPIKE"
+	PlaybookAPIDegradation   PlaybookName = "API_DEGRADATION"
+	PlaybookADLEvent         PlaybookName = "ADL_EVENT"
+	PlaybookLiquidationCascade PlaybookName = "LIQUIDATION_CASCADE"
+)
+
+// IncidentPlaybook describes the automated response for a detected incident.
+type IncidentPlaybook struct {
+	Name        PlaybookName `json:"name"`
+	TsMs        int64        `json:"ts_ms"`
+	TenantID    string       `json:"tenant_id"`
+	Trigger     string       `json:"trigger"`      // what caused activation
+	Actions     []string     `json:"actions"`       // steps taken
+	TargetMode  Mode         `json:"target_mode"`   // mode to transition to
+	AffectedVenues []string  `json:"affected_venues,omitempty"`
+	AutoResolveMs  int64     `json:"auto_resolve_ms,omitempty"` // 0 = manual resolution
 }

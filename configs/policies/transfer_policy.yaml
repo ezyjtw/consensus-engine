@@ -20,6 +20,34 @@ max_transfers_per_day: 10
 # operator is tricked into adding a malicious address.
 new_address_cooloff_hours: 48
 
+# Dual approval: transfers at or above this threshold require 2 sign-offs
+# from different operators. The requester cannot self-approve.
+# Set to 0 to disable (all transfers use single-approval).
+dual_approval_threshold_usd: 25000
+
+# Hours before pending transfers auto-expire (auto-denied). Default 24.
+approval_expiry_hours: 24
+
+# Region/jurisdiction constraints.
+# Each venue can be tagged with a region and a list of blocked regions.
+# Transfers to/from blocked region combinations are denied.
+venue_regions:
+  - venue: binance
+    region: GLOBAL
+    blocked_regions: ["US"]
+  - venue: okx
+    region: GLOBAL
+    blocked_regions: ["US"]
+  - venue: bybit
+    region: APAC
+    blocked_regions: ["US", "UK"]
+  - venue: deribit
+    region: EU
+    blocked_regions: []
+  - venue: coinbase
+    region: US
+    blocked_regions: []
+
 # Pre-approved destination addresses. Only addresses on this list may receive
 # transfers. Entries must be reviewed and added by an admin with 2FA confirmation.
 #

@@ -1,6 +1,7 @@
 package risk
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -35,6 +36,9 @@ type Daemon struct {
 
 	// Venue-wide deleveraging events (mass ADL) with timestamps.
 	delevEvents []int64 // unix ms timestamps
+
+	// Active incident playbooks.
+	activePlaybooks []IncidentPlaybook
 }
 
 func NewDaemon(policy *Policy) *Daemon {
@@ -279,6 +283,93 @@ func (d *Daemon) evaluate() []Alert {
 		d.state.Mode = newMode
 	}
 
+	// ── Incident playbook activation ──────────────────────────────────────
+	// Playbooks annotate alerts with structured response patterns.
+
+	if adlRisk >= d.policy.ADLRiskPausePct {
+		d.activatePlaybook(IncidentPlaybook{
+			Name:     PlaybookADLEvent,
+			TsMs:     now,
+			TenantID: d.policy.TenantID,
+			Trigger:  fmt.Sprintf("ADL risk %.0f%% >= %.0f%% threshold", adlRisk, d.policy.ADLRiskPausePct),
+			Actions: []string{
+				"PAUSE new order placement",
+				"Mark affected venues as degraded",
+				"Alert operator for manual review",
+			},
+			TargetMode:    ModePaused,
+			AutoResolveMs: 300_000, // 5 minutes — auto-resolve if ADL subsides
+		})
+		for i := range alerts {
+			if alerts[i].Source == "adl_risk_elevated" {
+				alerts[i].Playbook = string(PlaybookADLEvent)
+			}
+		}
+	}
+
+	if liqClusters >= d.policy.LiqClusterPauseCount && d.policy.LiqClusterPauseCount > 0 {
+		d.activatePlaybook(IncidentPlaybook{
+			Name:     PlaybookLiquidationCascade,
+			TsMs:     now,
+			TenantID: d.policy.TenantID,
+			Trigger:  fmt.Sprintf("%d liquidation clusters >= %d threshold", liqClusters, d.policy.LiqClusterPauseCount),
+			Actions: []string{
+				"PAUSE new order placement",
+				"Widen slippage tolerance on open hedges",
+				"Reduce position sizing to quarter-Kelly",
+			},
+			TargetMode:    ModePaused,
+			AutoResolveMs: 600_000, // 10 minutes
+		})
+		for i := range alerts {
+			if alerts[i].Source == "liquidation_cluster_dense" {
+				alerts[i].Playbook = string(PlaybookLiquidationCascade)
+			}
+		}
+	}
+
+	if delevCount >= d.policy.VenueDelevSafeModeCount {
+		d.activatePlaybook(IncidentPlaybook{
+			Name:     PlaybookVenueMaintenance,
+			TsMs:     now,
+			TenantID: d.policy.TenantID,
+			Trigger:  fmt.Sprintf("%d deleveraging events in window", delevCount),
+			Actions: []string{
+				"Enter SAFE mode — reduce-only",
+				"Cancel all pending orders on affected venues",
+				"Require manual resolution before resuming",
+			},
+			TargetMode:    ModeSafe,
+			AutoResolveMs: 0, // manual resolution required
+		})
+		for i := range alerts {
+			if alerts[i].Source == "venue_deleveraging_event" {
+				alerts[i].Playbook = string(PlaybookVenueMaintenance)
+			}
+		}
+	}
+
+	if errorRate >= d.policy.MaxErrorRate5mPct {
+		d.activatePlaybook(IncidentPlaybook{
+			Name:     PlaybookAPIDegradation,
+			TsMs:     now,
+			TenantID: d.policy.TenantID,
+			Trigger:  fmt.Sprintf("error rate %.1f%% >= %.1f%% threshold", errorRate, d.policy.MaxErrorRate5mPct),
+			Actions: []string{
+				"PAUSE new order placement",
+				"Log degraded venue API endpoints",
+				"Retry with exponential backoff",
+			},
+			TargetMode:    ModePaused,
+			AutoResolveMs: 300_000, // 5 minutes
+		})
+		for i := range alerts {
+			if alerts[i].Source == "error_rate_pause" {
+				alerts[i].Playbook = string(PlaybookAPIDegradation)
+			}
+		}
+	}
+
 	return alerts
 }
 
@@ -311,6 +402,52 @@ func (d *Daemon) alert(severity, source, msg, metric string, value, threshold fl
 		Value:     value,
 		Threshold: threshold,
 	}
+}
+
+// ActivePlaybooks returns a copy of the currently active incident playbooks.
+func (d *Daemon) ActivePlaybooks() []IncidentPlaybook {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	now := time.Now().UnixMilli()
+	// Prune auto-resolved playbooks.
+	active := d.activePlaybooks[:0]
+	for _, pb := range d.activePlaybooks {
+		if pb.AutoResolveMs > 0 && now > pb.TsMs+pb.AutoResolveMs {
+			log.Printf("risk-daemon: playbook %s auto-resolved after %dms", pb.Name, pb.AutoResolveMs)
+			continue
+		}
+		active = append(active, pb)
+	}
+	d.activePlaybooks = active
+	out := make([]IncidentPlaybook, len(active))
+	copy(out, active)
+	return out
+}
+
+// activatePlaybook adds a playbook if one with the same name isn't already active.
+// Must be called with d.mu held.
+func (d *Daemon) activatePlaybook(pb IncidentPlaybook) {
+	for _, existing := range d.activePlaybooks {
+		if existing.Name == pb.Name {
+			return // already active
+		}
+	}
+	log.Printf("risk-daemon: activating playbook %s: %s", pb.Name, pb.Trigger)
+	d.activePlaybooks = append(d.activePlaybooks, pb)
+}
+
+// ResolvePlaybook manually resolves an active playbook by name.
+func (d *Daemon) ResolvePlaybook(name PlaybookName) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	kept := d.activePlaybooks[:0]
+	for _, pb := range d.activePlaybooks {
+		if pb.Name != name {
+			kept = append(kept, pb)
+		}
+	}
+	d.activePlaybooks = kept
+	log.Printf("risk-daemon: playbook %s resolved", name)
 }
 
 func pruneOlderThan(ts []int64, cutoffMs int64) []int64 {
