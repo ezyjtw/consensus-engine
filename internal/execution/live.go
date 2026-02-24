@@ -35,10 +35,8 @@ type LiveExecutor struct {
 	registry   *exchange.Registry
 
 	// Micro-live graduation: rolling daily notional tracking.
-	dailyMu       sync.Mutex
-	dailyFills    []dailyFillEntry
-	openOrdersMu  sync.Mutex
-	openOrdersCnt int
+	dailyMu    sync.Mutex
+	dailyFills []dailyFillEntry
 }
 
 // dailyFillEntry tracks a fill timestamp and notional for rolling daily cap.
