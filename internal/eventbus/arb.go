@@ -16,15 +16,16 @@ import (
 
 // ArbRedisConfig configures the arb engine's Redis connection and stream names.
 type ArbRedisConfig struct {
-	Addr          string
-	Password      string
-	UseTLS        bool
-	InputStream   string        // e.g. "consensus:updates"
-	OutputIntents string        // e.g. "trade:intents"
-	ConsumerGroup string
-	ConsumerName  string
-	BlockMs       time.Duration //nolint:staticcheck // field name matches YAML config key
-	BatchSize     int64
+	Addr               string
+	Password           string
+	UseTLS             bool
+	InputStream        string        // e.g. "consensus:updates"
+	MarketQuotesStream string        // e.g. "market:quotes" (for basis tracker)
+	OutputIntents      string        // e.g. "trade:intents"
+	ConsumerGroup      string
+	ConsumerName       string
+	BlockMs            time.Duration //nolint:staticcheck // field name matches YAML config key
+	BatchSize          int64
 }
 
 // ArbBus handles all Redis stream I/O for the arb opportunity engine.
@@ -46,6 +47,16 @@ func NewArbBus(cfg ArbRedisConfig) (*ArbBus, error) {
 	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
 		_ = rdb.Close()
 		return nil, fmt.Errorf("creating consumer group on %q: %w", cfg.InputStream, err)
+	}
+	// Create consumer group for market:quotes if basis tracking is configured.
+	if cfg.MarketQuotesStream != "" {
+		quotesGroup := cfg.ConsumerGroup + "-basis"
+		err = rdb.XGroupCreateMkStream(ctx, cfg.MarketQuotesStream,
+			quotesGroup, "$").Err()
+		if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+			_ = rdb.Close()
+			return nil, fmt.Errorf("creating consumer group on %q: %w", cfg.MarketQuotesStream, err)
+		}
 	}
 	return &ArbBus{rdb: rdb, cfg: cfg}, nil
 }
@@ -88,6 +99,44 @@ func (b *ArbBus) ReadConsensusUpdates(ctx context.Context) ([]consensus.Consensu
 		}
 	}
 	return updates, nil
+}
+
+// ReadMarketQuotes reads raw quotes from the market:quotes stream for basis tracking.
+// Uses a separate consumer group ("<group>-basis") to avoid interfering with other consumers.
+func (b *ArbBus) ReadMarketQuotes(ctx context.Context) ([]consensus.Quote, error) {
+	if b.cfg.MarketQuotesStream == "" {
+		return nil, nil
+	}
+	quotesGroup := b.cfg.ConsumerGroup + "-basis"
+	streams, err := b.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group:    quotesGroup,
+		Consumer: b.cfg.ConsumerName,
+		Streams:  []string{b.cfg.MarketQuotesStream, ">"},
+		Count:    200,
+		Block:    100 * time.Millisecond,
+	}).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("XReadGroup (quotes): %w", err)
+	}
+	var quotes []consensus.Quote
+	for _, stream := range streams {
+		for _, msg := range stream.Messages {
+			raw, ok := msg.Values["data"].(string)
+			if !ok {
+				continue
+			}
+			var q consensus.Quote
+			if err := json.Unmarshal([]byte(raw), &q); err != nil {
+				continue
+			}
+			quotes = append(quotes, q)
+			_ = b.rdb.XAck(ctx, b.cfg.MarketQuotesStream, quotesGroup, msg.ID).Err()
+		}
+	}
+	return quotes, nil
 }
 
 // PublishTradeIntent appends a TradeIntent to the output intents stream.

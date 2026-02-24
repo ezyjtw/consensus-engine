@@ -55,15 +55,16 @@ func main() {
 	engine := arb.NewEngine(policy)
 
 	bus, err := eventbus.NewArbBus(eventbus.ArbRedisConfig{
-		Addr:          policy.Redis.Addr,
-		Password:      policy.Redis.Password,
-		UseTLS:        policy.Redis.UseTLS,
-		InputStream:   policy.Redis.InputStream,
-		OutputIntents: policy.Redis.OutputIntents,
-		ConsumerGroup: policy.Redis.ConsumerGroup,
-		ConsumerName:  policy.Redis.ConsumerName,
-		BlockMs:       time.Duration(policy.Redis.BlockMs) * time.Millisecond,
-		BatchSize:     policy.Redis.BatchSize,
+		Addr:               policy.Redis.Addr,
+		Password:           policy.Redis.Password,
+		UseTLS:             policy.Redis.UseTLS,
+		InputStream:        policy.Redis.InputStream,
+		MarketQuotesStream: policy.Redis.MarketQuotesStream,
+		OutputIntents:      policy.Redis.OutputIntents,
+		ConsumerGroup:      policy.Redis.ConsumerGroup,
+		ConsumerName:       policy.Redis.ConsumerName,
+		BlockMs:            time.Duration(policy.Redis.BlockMs) * time.Millisecond,
+		BatchSize:          policy.Redis.BatchSize,
 	})
 	if err != nil {
 		log.Fatalf("failed to create event bus: %v", err)
@@ -78,10 +79,64 @@ func main() {
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// ── Basis Tracker ────────────────────────────────────────────────────
+	var basisTracker *arb.BasisTracker
+	var basisCooldown *arb.Cooldown
+	basisCfg := policy.BasisTrade
+
+	if basisCfg.Enabled && policy.Redis.MarketQuotesStream != "" {
+		windowSize := basisCfg.WindowSize
+		if windowSize < 10 {
+			windowSize = 200
+		}
+		basisTracker = arb.NewBasisTracker(windowSize)
+		basisCooldown = arb.NewCooldown(basisCfg.CooldownMs)
+		log.Printf("basis-tracker: enabled min_basis=%.1fbps min_z=%.1f window=%d eval=%ds",
+			basisCfg.MinBasisBps, basisCfg.MinZScore, windowSize, basisCfg.EvalIntervalS)
+
+		// Background goroutine: drain market:quotes and feed basis tracker.
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				quotes, err := bus.ReadMarketQuotes(ctx)
+				if err != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					log.Printf("basis: quote read error: %v", err)
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+				for _, q := range quotes {
+					basisTracker.RecordQuote(q)
+				}
+			}
+		}()
+	} else {
+		log.Println("basis-tracker: disabled")
+	}
+
 	log.Println("arb-opportunity-engine started")
 
 	statsTicker := time.NewTicker(30 * time.Second)
 	defer statsTicker.Stop()
+
+	// Basis evaluation timer.
+	basisInterval := 5
+	if basisCfg.EvalIntervalS > 0 {
+		basisInterval = basisCfg.EvalIntervalS
+	}
+	basisTicker := time.NewTicker(time.Duration(basisInterval) * time.Second)
+	defer basisTicker.Stop()
+
+	tenantID := os.Getenv("TENANT_ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
 
 	for {
 		select {
@@ -90,6 +145,34 @@ func main() {
 			return
 		case <-statsTicker.C:
 			logStats(engine)
+		case <-basisTicker.C:
+			if basisTracker == nil {
+				continue
+			}
+			if bus.KillSwitchActive(ctx) {
+				continue
+			}
+			basisIntents := basisTracker.EvaluateBasisTrades(arb.BasisConfig{
+				MinBasisBps:    basisCfg.MinBasisBps,
+				MinZScore:      basisCfg.MinZScore,
+				MaxNotionalUSD: basisCfg.MaxNotionalUSD,
+				MaxSlippageBps: basisCfg.MaxSlippageBps,
+				IntentTTLMs:    basisCfg.IntentTTLMs,
+				CooldownMs:     basisCfg.CooldownMs,
+			}, tenantID, basisCooldown)
+			for _, intent := range basisIntents {
+				if err := bus.PublishTradeIntent(ctx, intent); err != nil {
+					log.Printf("basis: publish error: %v", err)
+					continue
+				}
+				log.Printf("basis: intent sym=%s venue=%s basis=%.1fbps net_edge=%.2fbps id=%s",
+					intent.Symbol,
+					intent.Debug.BuyOn,
+					intent.Expected.EdgeBpsGross,
+					intent.Expected.EdgeBpsNet,
+					intent.IntentID,
+				)
+			}
 		default:
 		}
 

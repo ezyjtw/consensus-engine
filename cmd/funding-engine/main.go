@@ -32,12 +32,19 @@ func main() {
 		policy.MinAnnualYieldPct["HIGH"], policy.MinAnnualYieldPct["MED"])
 
 	engine := funding.NewEngine(policy)
+	posTracker := funding.NewPositionTracker()
+
+	tenantID := os.Getenv("TENANT_ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
 
 	bus, err := eventbus.NewFundingBus(eventbus.FundingBusConfig{
 		Addr:          policy.Redis.Addr,
 		Password:      policy.Redis.Password,
 		UseTLS:        policy.Redis.UseTLS,
 		InputStream:   policy.Redis.InputStream,
+		EventsStream:  policy.Redis.EventsStream,
 		OutputIntents: policy.Redis.OutputIntents,
 		ConsumerGroup: policy.Redis.ConsumerGroup,
 		ConsumerName:  policy.Redis.ConsumerName,
@@ -52,6 +59,32 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Background goroutine: drain execution:events to track open positions.
+	if policy.Redis.EventsStream != "" {
+		log.Printf("funding-engine: position tracking enabled (stream=%s)", policy.Redis.EventsStream)
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				events, err := bus.ReadExecutionEvents(ctx)
+				if err != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					log.Printf("funding-engine: events read error: %v", err)
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+				for _, ev := range events {
+					posTracker.ProcessEvent(ev)
+				}
+			}
+		}()
+	}
 
 	evalTicker := time.NewTicker(time.Duration(policy.EvalIntervalS) * time.Second)
 	defer evalTicker.Stop()
@@ -78,17 +111,41 @@ func main() {
 					log.Printf("stats[rejected]: reason=%s count=%d", k, v)
 				}
 			}
+			// Log open positions.
+			positions := posTracker.OpenPositions()
+			if len(positions) > 0 {
+				log.Printf("stats[positions]: %d open funding positions", len(positions))
+				for _, p := range positions {
+					log.Printf("  position: strategy=%s sym=%s venue=%s notional=$%.0f",
+						p.Strategy, p.Symbol, posVenue(p), p.NotionalUSD)
+				}
+			}
 
 		case <-evalTicker.C:
 			if bus.KillSwitchActive(ctx) {
 				log.Println("funding-engine: kill switch active — skipping eval")
 				continue
 			}
-			tenantID := "default"
+
+			// Evaluate new entry opportunities.
 			intents := engine.Evaluate(tenantID)
 			for _, intent := range intents {
 				if err := bus.PublishIntent(ctx, intent); err != nil {
 					log.Printf("funding-engine: publish error: %v", err)
+				}
+			}
+
+			// Evaluate exit signals on open positions.
+			positions := posTracker.OpenPositions()
+			if len(positions) > 0 {
+				exitIntents := engine.EvaluateExits(tenantID, positions)
+				for _, intent := range exitIntents {
+					if err := bus.PublishIntent(ctx, intent); err != nil {
+						log.Printf("funding-engine: exit publish error: %v", err)
+					} else {
+						log.Printf("funding-engine: EXIT intent strategy=%s sym=%s id=%s",
+							intent.Strategy, intent.Symbol, intent.IntentID)
+					}
 				}
 			}
 
@@ -109,4 +166,12 @@ func main() {
 			}
 		}
 	}
+}
+
+// posVenue returns a human-readable venue string for logging.
+func posVenue(p funding.OpenPosition) string {
+	if p.Venue != "" {
+		return p.Venue
+	}
+	return p.LongVenue + "/" + p.ShortVenue
 }
