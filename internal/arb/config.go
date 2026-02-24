@@ -21,20 +21,35 @@ type Policy struct {
 	AllowWarnVenues     bool                  `yaml:"allow_warn_venues"`
 	IgnoreFlaggedVenues bool                  `yaml:"ignore_flagged_venues"`
 	EnabledPairs        map[string][][]string `yaml:"enabled_pairs"`
+	BasisTrade          BasisTradePolicy      `yaml:"basis_trade"`
 	Redis               ArbRedisPolicy        `yaml:"redis"`
+}
+
+// BasisTradePolicy configures the spot-futures basis convergence strategy.
+type BasisTradePolicy struct {
+	Enabled        bool    `yaml:"enabled"`
+	MinBasisBps    float64 `yaml:"min_basis_bps"`
+	MinZScore      float64 `yaml:"min_z_score"`
+	MaxNotionalUSD float64 `yaml:"max_notional_usd"`
+	MaxSlippageBps float64 `yaml:"max_slippage_bps"`
+	IntentTTLMs    int64   `yaml:"intent_ttl_ms"`
+	CooldownMs     int64   `yaml:"cooldown_ms"`
+	WindowSize     int     `yaml:"window_size"`
+	EvalIntervalS  int     `yaml:"eval_interval_s"`
 }
 
 // ArbRedisPolicy holds the Redis connection and stream configuration.
 type ArbRedisPolicy struct {
-	Addr          string `yaml:"addr"`
-	Password      string `yaml:"password"`
-	UseTLS        bool   `yaml:"use_tls"`
-	InputStream   string `yaml:"input_stream"`
-	OutputIntents string `yaml:"output_intents"`
-	ConsumerGroup string `yaml:"consumer_group"`
-	ConsumerName  string `yaml:"consumer_name"`
-	BlockMs       int64  `yaml:"block_ms"`
-	BatchSize     int64  `yaml:"batch_size"`
+	Addr               string `yaml:"addr"`
+	Password           string `yaml:"password"`
+	UseTLS             bool   `yaml:"use_tls"`
+	InputStream        string `yaml:"input_stream"`
+	MarketQuotesStream string `yaml:"market_quotes_stream"`
+	OutputIntents      string `yaml:"output_intents"`
+	ConsumerGroup      string `yaml:"consumer_group"`
+	ConsumerName       string `yaml:"consumer_name"`
+	BlockMs            int64  `yaml:"block_ms"`
+	BatchSize          int64  `yaml:"batch_size"`
 }
 
 func LoadPolicy(path string) (*Policy, error) {

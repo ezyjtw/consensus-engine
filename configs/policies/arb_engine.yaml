@@ -62,11 +62,25 @@ enabled_pairs:
     - [okx, deribit]
     - [bybit, deribit]
 
+# Spot-futures basis convergence strategy.
+# Detects when mark-index basis is elevated and trades mean-reversion.
+basis_trade:
+  enabled: true
+  min_basis_bps: 15.0
+  min_z_score: 1.5
+  max_notional_usd: 10000
+  max_slippage_bps: 8.0
+  intent_ttl_ms: 5000
+  cooldown_ms: 5000
+  window_size: 200
+  eval_interval_s: 5
+
 redis:
   addr: "localhost:6379"
   password: ""
   use_tls: false
   input_stream: "consensus:updates"
+  market_quotes_stream: "market:quotes"
   output_intents: "trade:intents"
   consumer_group: "arb-engine"
   consumer_name: "worker-1"

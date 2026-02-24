@@ -32,6 +32,7 @@ type RedisPolicy struct {
 	Password      string `yaml:"password"`
 	UseTLS        bool   `yaml:"use_tls"`
 	InputStream   string `yaml:"input_stream"`   // market:quotes
+	EventsStream  string `yaml:"events_stream"`  // execution:events (position tracking)
 	OutputIntents string `yaml:"output_intents"` // trade:intents
 	ConsumerGroup string `yaml:"consumer_group"`
 	ConsumerName  string `yaml:"consumer_name"`

@@ -46,6 +46,7 @@ redis:
   password: ""
   use_tls: false
   input_stream: "market:quotes"
+  events_stream: "execution:events"
   output_intents: "trade:intents"
   consumer_group: "funding-engine"
   consumer_name: "worker-1"
