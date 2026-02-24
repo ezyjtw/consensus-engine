@@ -131,6 +131,11 @@ func main() {
 				continue
 			}
 
+			// Pick up any dashboard stage overrides before evaluating.
+			if stages := bus.ReadStageOverrides(ctx); stages != nil {
+				engine.SetRuntimeStages(stages)
+			}
+
 			// Evaluate new entry opportunities.
 			intents := engine.Evaluate(tenantID)
 			for _, intent := range intents {

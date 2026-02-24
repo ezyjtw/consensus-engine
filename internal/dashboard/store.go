@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	keyConnPrefix  = "dashboard:conn:"
-	keyAlertConfig = "dashboard:alert:config"
-	keyKillSwitch  = "kill:switch"
+	keyConnPrefix   = "dashboard:conn:"
+	keyAlertConfig  = "dashboard:alert:config"
+	keyKillSwitch   = "kill:switch"
+	keyFundingStages = "config:funding:stages"
 )
 
 // ConnectionConfig holds exchange API credentials (stored encrypted).
@@ -159,4 +160,55 @@ func (s *Store) GetKillSwitch(ctx context.Context) (KillSwitchState, error) {
 	}
 	var state KillSwitchState
 	return state, json.Unmarshal(data, &state)
+}
+
+// FundingStageEntry represents a single symbol's stage override stored in Redis.
+type FundingStageEntry struct {
+	Symbol    string `json:"symbol"`
+	Stage     string `json:"stage"`
+	UpdatedMs int64  `json:"updated_ms"`
+}
+
+// GetFundingStages returns all dynamic stage overrides from Redis.
+func (s *Store) GetFundingStages(ctx context.Context) ([]FundingStageEntry, error) {
+	data, err := s.rdb.Get(ctx, keyFundingStages).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var entries []FundingStageEntry
+	return entries, json.Unmarshal(data, &entries)
+}
+
+// SetFundingStage updates a single symbol's stage in the stored list.
+// If the symbol doesn't exist in the list, it's appended.
+func (s *Store) SetFundingStage(ctx context.Context, symbol, stage string) error {
+	entries, err := s.GetFundingStages(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UnixMilli()
+	found := false
+	for i := range entries {
+		if entries[i].Symbol == symbol {
+			entries[i].Stage = stage
+			entries[i].UpdatedMs = now
+			found = true
+			break
+		}
+	}
+	if !found {
+		entries = append(entries, FundingStageEntry{
+			Symbol:    symbol,
+			Stage:     stage,
+			UpdatedMs: now,
+		})
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	return s.rdb.Set(ctx, keyFundingStages, data, 0).Err()
 }

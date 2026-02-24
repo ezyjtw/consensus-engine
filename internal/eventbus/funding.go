@@ -125,6 +125,33 @@ func (b *FundingBus) SystemMode(ctx context.Context) string {
 	return b.sc.SystemMode(ctx)
 }
 
+// StageOverride represents a single symbol→stage mapping from Redis.
+type StageOverride struct {
+	Symbol string `json:"symbol"`
+	Stage  string `json:"stage"`
+}
+
+// ReadStageOverrides reads dynamic funding stage overrides from Redis.
+// Returns nil if no overrides are configured. The funding engine checks
+// these before the YAML-configured stages, allowing runtime promotion
+// via the dashboard without service restarts.
+func (b *FundingBus) ReadStageOverrides(ctx context.Context) map[string]string {
+	raw := b.sc.GetString(ctx, "config:funding:stages")
+	if raw == "" {
+		return nil
+	}
+	var entries []StageOverride
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+		log.Printf("funding bus: unmarshal stage overrides: %v", err)
+		return nil
+	}
+	m := make(map[string]string, len(entries))
+	for _, e := range entries {
+		m[e.Symbol] = e.Stage
+	}
+	return m
+}
+
 // Close releases the Redis connection.
 func (b *FundingBus) Close() error {
 	return b.sc.Close()

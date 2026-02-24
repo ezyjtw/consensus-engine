@@ -37,6 +37,9 @@ type Engine struct {
 	forecaster *RegimeForecaster
 	scheduler  *FundingScheduler
 	volTracker *VolTracker
+	// runtimeStages holds dynamic stage overrides set via the dashboard.
+	// These take precedence over YAML-configured stages in SymbolOverrides.
+	runtimeStages map[string]FundingStage
 }
 
 func NewEngine(p *Policy) *Engine {
@@ -88,6 +91,33 @@ func (e *Engine) UpdateQuote(q consensus.Quote) {
 	d.updatedMs = q.TsMs
 }
 
+// SetRuntimeStages updates the dynamic stage overrides from Redis.
+// Called before each evaluation cycle to pick up dashboard changes.
+// Passing nil clears all runtime overrides, falling back to YAML config.
+func (e *Engine) SetRuntimeStages(stages map[string]string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if stages == nil {
+		e.runtimeStages = nil
+		return
+	}
+	m := make(map[string]FundingStage, len(stages))
+	for sym, s := range stages {
+		m[sym] = FundingStage(s)
+	}
+	e.runtimeStages = m
+}
+
+// effectiveStage returns the runtime stage if set, else the YAML-configured stage.
+func (e *Engine) effectiveStage(symbol string) FundingStage {
+	if e.runtimeStages != nil {
+		if s, ok := e.runtimeStages[symbol]; ok {
+			return s
+		}
+	}
+	return e.policy.stage(symbol)
+}
+
 // Regime returns the current regime snapshot for a venue+symbol pair.
 // Returns nil if no funding rate data has been seen yet for that pair.
 func (e *Engine) Regime(venue, symbol string) *Regime {
@@ -110,7 +140,7 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 
 	for _, sym := range e.policy.Symbols {
 		venueMap := e.state[sym]
-		symStage := e.policy.stage(sym)
+		symStage := e.effectiveStage(sym)
 
 		// ── FUNDING_CARRY (one venue: long spot, short perp) ──────────────
 		for ven, d := range venueMap {
@@ -346,7 +376,7 @@ func (e *Engine) minYield(symbol string, annualNetPct float64) float64 {
 // applyStageNotional applies the CONSERVATIVE size scaling factor to notional.
 // For non-CONSERVATIVE stages, returns notional unchanged.
 func (e *Engine) applyStageNotional(sym string, notional float64) float64 {
-	if e.policy.stage(sym) == StageConservative {
+	if e.effectiveStage(sym) == StageConservative {
 		return notional * e.policy.sizeScale(sym)
 	}
 	return notional
@@ -354,7 +384,7 @@ func (e *Engine) applyStageNotional(sym string, notional float64) float64 {
 
 // applyStageConstraints sets ForcePaperMode on intents from PAPER-stage symbols.
 func (e *Engine) applyStageConstraints(sym string, intent *arb.TradeIntent) {
-	if e.policy.stage(sym) == StagePaper {
+	if e.effectiveStage(sym) == StagePaper {
 		intent.Constraints.ForcePaperMode = true
 	}
 }

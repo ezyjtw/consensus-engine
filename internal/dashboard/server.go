@@ -63,6 +63,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/kill", s.auth(s.handleGetKill))
 	s.mux.HandleFunc("POST /api/kill", s.authRole(auth.RoleTrader, s.handleActivateKill))
 	s.mux.HandleFunc("DELETE /api/kill", s.authRole(auth.RoleTrader, s.handleDeactivateKill))
+
+	// Funding stage management (admin-only writes, any auth reads).
+	s.mux.HandleFunc("GET /api/config/stages", s.auth(s.handleGetStages))
+	s.mux.HandleFunc("PUT /api/config/stages/{symbol}", s.authRole(auth.RoleAdmin, s.handleSetStage))
 }
 
 // ── Auth middleware ────────────────────────────────────────────────────────
@@ -101,8 +105,11 @@ func (s *Server) authRole(minRole auth.Role, next http.HandlerFunc) http.Handler
 func (s *Server) resolveKey(r *http.Request) *auth.APIKey {
 	token := auth.ExtractBearer(r)
 	if token == "" {
-		// No auth configured in dev mode.
-		if s.authToken == "" && s.db == nil {
+		// No auth configured in dev mode. main.go already validates that
+		// authToken=="" is only allowed when ENV is dev/empty, so we can
+		// safely grant admin access here regardless of whether Postgres is
+		// connected (Postgres may be used for historical data, not auth).
+		if s.authToken == "" {
 			return &auth.APIKey{Role: auth.RoleAdmin, TenantID: "default", Name: "dev"}
 		}
 		return nil
@@ -252,6 +259,58 @@ func (s *Server) handleDeactivateKill(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Println("KILL SWITCH DEACTIVATED")
 	jsonOK(w, map[string]string{"status": "deactivated"})
+}
+
+// --- Funding stages ---
+
+// validStages are the allowed funding stage values.
+var validStages = map[string]bool{
+	"OBSERVE": true, "PAPER": true, "CONSERVATIVE": true, "FULL": true,
+}
+
+func (s *Server) handleGetStages(w http.ResponseWriter, r *http.Request) {
+	entries, err := s.store.GetFundingStages(r.Context())
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if entries == nil {
+		entries = []FundingStageEntry{}
+	}
+	jsonOK(w, entries)
+}
+
+func (s *Server) handleSetStage(w http.ResponseWriter, r *http.Request) {
+	symbol := r.PathValue("symbol")
+	if symbol == "" {
+		jsonErr(w, "symbol is required", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		Stage string `json:"stage"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonErr(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if !validStages[req.Stage] {
+		jsonErr(w, "invalid stage: must be OBSERVE, PAPER, CONSERVATIVE, or FULL", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.SetFundingStage(r.Context(), symbol, req.Stage); err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if s.db != nil {
+		if key := auth.FromContext(r.Context()); key != nil {
+			_ = s.db.AuditLogRich(r.Context(), key.TenantID, key.Name, string(key.Role),
+				auth.ClientIP(r), "set_funding_stage", map[string]string{
+					"symbol": symbol, "stage": req.Stage,
+				})
+		}
+	}
+	log.Printf("funding stage updated: %s → %s", symbol, req.Stage)
+	jsonOK(w, map[string]string{"status": "updated", "symbol": symbol, "stage": req.Stage})
 }
 
 // --- helpers ---
