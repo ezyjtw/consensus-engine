@@ -62,6 +62,18 @@ type TradeIntent struct {
 	Debug       IntentDebug       `json:"debug"`
 }
 
+// VenueMetricsToQuote converts a VenueMetrics from a consensus update into a Quote
+// suitable for feeding sub-strategy trackers (cascade, correlation, DEX-CEX).
+func VenueMetricsToQuote(vm VenueMetrics, symbol consensus.Symbol) consensus.Quote {
+	return consensus.Quote{
+		Venue:   vm.Venue,
+		Symbol:  symbol,
+		BestBid: vm.EffectiveSell, // sell exec price ≈ best bid
+		BestAsk: vm.EffectiveBuy,  // buy exec price ≈ best ask
+		TsMs:    0,                // will be set by caller if needed
+	}
+}
+
 // RejectionReason is used for observability counters.
 type RejectionReason string
 

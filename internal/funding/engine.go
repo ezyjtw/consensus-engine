@@ -13,6 +13,7 @@ import (
 const (
 	StrategyFundingCarry        = "FUNDING_CARRY"
 	StrategyFundingDifferential = "FUNDING_DIFFERENTIAL"
+	StrategyFundingCarryReverse = "FUNDING_CARRY_REVERSE"
 )
 
 // venueData holds the latest known rates and fees for one venue+symbol.
@@ -164,6 +165,56 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 			e.Emitted[StrategyFundingCarry]++
 			log.Printf("funding: CARRY intent sym=%s venue=%s net_annual=%.2f%% notional=%.0f",
 				sym, ven, annualNetPct, notional)
+		}
+
+		// ── FUNDING_CARRY_REVERSE (one venue: short spot, long perp when rate < 0)
+		for ven, d := range venueMap {
+			if d.markPrice == 0 || d.fundingRate == 0 {
+				continue
+			}
+			// Only trigger when funding rate is negative (shorts paying longs).
+			if d.fundingRate >= 0 {
+				continue
+			}
+
+			// Skip if the regime is VOLATILE.
+			if r := e.forecaster.Get(ven, sym); r != nil && r.Label == "VOLATILE" {
+				e.Rejected["reverse_carry_volatile_regime"]++
+				continue
+			}
+
+			// Skip near funding reset.
+			if nearReset {
+				e.Rejected["reverse_carry_near_reset"]++
+				continue
+			}
+
+			// Annualised gross yield from negative funding: |rate| × 3 × 365 × 100
+			annualGrossPct := -d.fundingRate * 3 * 365 * 100
+			entryFeePct := d.feeBpsTaker * 2 / 10000 * 100
+			annualNetPct := annualGrossPct - entryFeePct
+
+			threshold := e.minYield(annualNetPct)
+			if annualNetPct < threshold {
+				e.Rejected["reverse_carry_below_threshold"]++
+				continue
+			}
+
+			key := fmt.Sprintf("reverse_carry:%s:%s", sym, ven)
+			if e.onCooldown(key, nowMs) {
+				e.Rejected["reverse_carry_cooldown"]++
+				continue
+			}
+
+			notional := e.policy.MaxNotionalUSD
+			notional = e.applyVolGate(ven, sym, notional)
+
+			intent := e.buildReverseCarryIntent(tenantID, sym, ven, d, notional, annualNetPct, nowMs)
+			intents = append(intents, intent)
+			e.cooldown[key] = nowMs
+			e.Emitted[StrategyFundingCarryReverse]++
+			log.Printf("funding: REVERSE CARRY intent sym=%s venue=%s net_annual=%.2f%% notional=%.0f rate=%.6f",
+				sym, ven, annualNetPct, notional, d.fundingRate)
 		}
 
 		// ── FUNDING_DIFFERENTIAL (cross-venue: long low-rate, short high-rate) ─
@@ -374,6 +425,53 @@ func (e *Engine) buildDiffIntent(tenantID, sym, longVenue, shortVenue string,
 			MaxAgeMs:        e.policy.IntentTTLMs,
 			HedgePreference: "SIMULTANEOUS_OR_HEDGE_FIRST",
 			CooldownKey:     fmt.Sprintf("diff:%s:%s:%s", sym, longVenue, shortVenue),
+		},
+	}
+}
+
+func (e *Engine) buildReverseCarryIntent(tenantID, sym, venue string, d *venueData,
+	notional, annualNetPct float64, nowMs int64) arb.TradeIntent {
+
+	feeUSD := notional * d.feeBpsTaker * 2 / 10000
+	return arb.TradeIntent{
+		TenantID:  tenantID,
+		IntentID:  newUUID(),
+		Strategy:  StrategyFundingCarryReverse,
+		Symbol:    sym,
+		TsMs:      nowMs,
+		ExpiresMs: nowMs + e.policy.IntentTTLMs,
+		Legs: []arb.TradeLeg{
+			{
+				Venue:          venue,
+				Action:         "SELL",
+				Market:         "SPOT",
+				Type:           "MARKET_OR_IOC",
+				NotionalUSD:    notional,
+				MaxSlippageBps: e.policy.MaxSlippageBps,
+				PriceLimit:     d.markPrice * 0.995,
+			},
+			{
+				Venue:          venue,
+				Action:         "BUY",
+				Market:         "PERP",
+				Type:           "MARKET_OR_IOC",
+				NotionalUSD:    notional,
+				MaxSlippageBps: e.policy.MaxSlippageBps,
+				PriceLimit:     d.markPrice * 1.005,
+			},
+		},
+		Expected: arb.ExpectedMetrics{
+			FundingRate8hBps:  d.fundingRate * 10000,
+			AnnualYieldPctNet: annualNetPct,
+			FeesUSDEst:        feeUSD,
+			ProfitUSDNet:      notional * annualNetPct / 100 / 365 * 8 / 24,
+		},
+		Constraints: arb.IntentConstraints{
+			MinQuality:      "MED",
+			RequireVenueOK:  true,
+			MaxAgeMs:        e.policy.IntentTTLMs,
+			HedgePreference: "SIMULTANEOUS_OR_HEDGE_FIRST",
+			CooldownKey:     fmt.Sprintf("reverse_carry:%s:%s", sym, venue),
 		},
 	}
 }

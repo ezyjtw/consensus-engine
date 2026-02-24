@@ -10,13 +10,17 @@ import (
 	"time"
 
 	"github.com/ezyjtw/consensus-engine/internal/arb"
+	"github.com/ezyjtw/consensus-engine/internal/dex"
 	"github.com/ezyjtw/consensus-engine/internal/eventbus"
 	"github.com/ezyjtw/consensus-engine/internal/redact"
+	"gopkg.in/yaml.v3"
 )
 
 func main() {
 	cfgPath := flag.String("config",
 		"configs/policies/arb_engine.yaml", "Path to arb engine policy YAML")
+	dexCfgPath := flag.String("dex-config",
+		"configs/policies/dex_routing.yaml", "Path to DEX routing config YAML")
 	flag.Parse()
 
 	// Log env vars that override config (mirrors consensus-engine convention).
@@ -79,6 +83,11 @@ func main() {
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	tenantID := os.Getenv("TENANT_ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// ── Basis Tracker ────────────────────────────────────────────────────
 	var basisTracker *arb.BasisTracker
 	var basisCooldown *arb.Cooldown
@@ -120,6 +129,60 @@ func main() {
 		log.Println("basis-tracker: disabled")
 	}
 
+	// ── Cascade Detector ─────────────────────────────────────────────────
+	var cascadeDetector *arb.CascadeDetector
+	var cascadeCooldown *arb.Cooldown
+	cascadeCfg := policy.Cascade
+
+	if cascadeCfg.Enabled {
+		cascadeDetector = arb.NewCascadeDetector()
+		cascadeCooldown = arb.NewCooldown(cascadeCfg.CooldownMs)
+		log.Printf("cascade-detector: enabled oi_drop=%.1f%% price_move=%.1fbps window=%dms",
+			cascadeCfg.OIDropPct, cascadeCfg.PriceMoveBps, cascadeCfg.WindowMs)
+	} else {
+		log.Println("cascade-detector: disabled")
+	}
+
+	// ── Correlation Tracker ──────────────────────────────────────────────
+	var corrTracker *arb.CorrelationTracker
+	var corrCooldown *arb.Cooldown
+	corrCfg := policy.Correlation
+
+	if corrCfg.Enabled && corrCfg.PrimarySymbol != "" && corrCfg.SecondarySymbol != "" {
+		windowSize := corrCfg.WindowSize
+		if windowSize < 20 {
+			windowSize = 100
+		}
+		corrTracker = arb.NewCorrelationTracker(corrCfg.PrimarySymbol, corrCfg.SecondarySymbol, windowSize)
+		corrCooldown = arb.NewCooldown(corrCfg.CooldownMs)
+		log.Printf("correlation-tracker: enabled primary=%s secondary=%s break=%.2f z_min=%.1f",
+			corrCfg.PrimarySymbol, corrCfg.SecondarySymbol, corrCfg.BreakThreshold, corrCfg.SpreadZScoreMin)
+	} else {
+		log.Println("correlation-tracker: disabled")
+	}
+
+	// ── DEX-CEX Tracker ──────────────────────────────────────────────────
+	var dexcexTracker *arb.DEXCEXTracker
+	dexcexCfg := policy.DEXCEX
+
+	if dexcexCfg.Enabled {
+		// Load DEX routing config.
+		var dexCfg dex.Config
+		if data, err := os.ReadFile(*dexCfgPath); err == nil {
+			_ = yaml.Unmarshal(data, &dexCfg)
+		}
+		if dexCfg.Enabled {
+			router := dex.New(dexCfg)
+			dexcexTracker = arb.NewDEXCEXTracker(router)
+			log.Printf("dex-cex-tracker: enabled min_edge=%.1fbps chain=%d tokens=%d",
+				dexcexCfg.MinEdgeBps, dexcexCfg.ChainID, len(dexcexCfg.TokenAddresses))
+		} else {
+			log.Println("dex-cex-tracker: disabled (dex routing not enabled)")
+		}
+	} else {
+		log.Println("dex-cex-tracker: disabled")
+	}
+
 	log.Println("arb-opportunity-engine started")
 
 	statsTicker := time.NewTicker(30 * time.Second)
@@ -133,10 +196,9 @@ func main() {
 	basisTicker := time.NewTicker(time.Duration(basisInterval) * time.Second)
 	defer basisTicker.Stop()
 
-	tenantID := os.Getenv("TENANT_ID")
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	// Strategy evaluation timer (cascade, correlation, DEX-CEX).
+	strategyTicker := time.NewTicker(10 * time.Second)
+	defer strategyTicker.Stop()
 
 	for {
 		select {
@@ -173,6 +235,50 @@ func main() {
 					intent.IntentID,
 				)
 			}
+		case <-strategyTicker.C:
+			if bus.KillSwitchActive(ctx) {
+				continue
+			}
+			// ── Cascade evaluation ──
+			if cascadeDetector != nil {
+				cascadeIntents := cascadeDetector.Evaluate(cascadeCfg, tenantID, cascadeCooldown)
+				for _, intent := range cascadeIntents {
+					if err := bus.PublishTradeIntent(ctx, intent); err != nil {
+						log.Printf("cascade: publish error: %v", err)
+						continue
+					}
+					log.Printf("cascade: intent sym=%s venue=%s edge=%.1fbps id=%s",
+						intent.Symbol, intent.Legs[0].Venue,
+						intent.Expected.EdgeBpsGross, intent.IntentID)
+				}
+			}
+
+			// ── Correlation evaluation ──
+			if corrTracker != nil {
+				corrIntents := corrTracker.EvaluateCorrelationTrades(corrCfg, tenantID, corrCooldown)
+				for _, intent := range corrIntents {
+					if err := bus.PublishTradeIntent(ctx, intent); err != nil {
+						log.Printf("correlation: publish error: %v", err)
+						continue
+					}
+					log.Printf("correlation: intent sym=%s venue=%s edge=%.1fbps id=%s",
+						intent.Symbol, intent.Legs[0].Venue,
+						intent.Expected.EdgeBpsGross, intent.IntentID)
+				}
+			}
+
+			// ── DEX-CEX evaluation (async, makes HTTP calls) ──
+			if dexcexTracker != nil {
+				dexcexIntents := dexcexTracker.EvaluateDEXCEX(ctx, dexcexCfg, tenantID, nil)
+				for _, intent := range dexcexIntents {
+					if err := bus.PublishTradeIntent(ctx, intent); err != nil {
+						log.Printf("dex-cex: publish error: %v", err)
+						continue
+					}
+					log.Printf("dex-cex: intent sym=%s edge=%.1fbps id=%s",
+						intent.Symbol, intent.Expected.EdgeBpsGross, intent.IntentID)
+				}
+			}
 		default:
 		}
 
@@ -208,6 +314,20 @@ func main() {
 					intent.ExpiresMs-intent.TsMs,
 					intent.IntentID,
 				)
+			}
+
+			// Feed cascade detector and correlation tracker from consensus updates.
+			for _, vm := range update.Venues {
+				q := arb.VenueMetricsToQuote(vm, update.Symbol)
+				if cascadeDetector != nil {
+					cascadeDetector.RecordQuote(q)
+				}
+				if corrTracker != nil {
+					corrTracker.RecordQuote(q)
+				}
+				if dexcexTracker != nil {
+					dexcexTracker.RecordQuote(q)
+				}
 			}
 		}
 	}

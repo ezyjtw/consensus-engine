@@ -29,6 +29,14 @@ type Policy struct {
 	// simple proportional scale against the strategy cap.
 	KellyFraction float64 `yaml:"kelly_fraction"`
 
+	// BaselineOI is the reference open interest (contracts) for OI-gated sizing.
+	// When current OI falls below this, position sizes are reduced.
+	// 0 = OI gating disabled.
+	BaselineOI float64 `yaml:"baseline_oi"`
+
+	// OIStream is the Redis stream for open interest updates.
+	OIStream string `yaml:"oi_stream"`
+
 	Redis RedisPolicy `yaml:"redis"`
 }
 
