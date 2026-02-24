@@ -483,6 +483,24 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
         </div>
       </div>
 
+      <!-- Trading Mode -->
+      <div class="card" id="trading-mode-card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          Trading Mode
+          <span id="trading-mode-label" style="font-weight:bold;font-size:14px;color:var(--yellow)">PAPER</span>
+        </div>
+        <div class="stat-row"><span class="stat-label">BALANCE</span><span class="stat-val" id="tm-balance">—</span></div>
+        <div class="stat-row"><span class="stat-label">INITIAL CAPITAL</span><span class="stat-val" id="tm-initial">—</span></div>
+        <div class="stat-row"><span class="stat-label">DEPLOYED</span><span class="stat-val" id="tm-deployed">—</span></div>
+        <div class="stat-row"><span class="stat-label">AVAILABLE</span><span class="stat-val" id="tm-available">—</span></div>
+        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn-sm" id="tm-btn-paper" style="padding:4px 12px;font-size:10px;border-radius:3px;cursor:pointer;background:rgba(245,158,11,.15);border:1px solid var(--yellow);color:var(--yellow)" onclick="setTradingMode('PAPER')">PAPER</button>
+          <button class="btn-sm" id="tm-btn-shadow" style="padding:4px 12px;font-size:10px;border-radius:3px;cursor:pointer;background:transparent;border:1px solid var(--orange);color:var(--orange)" onclick="setTradingMode('SHADOW')">SHADOW</button>
+          <button class="btn-sm" id="tm-btn-live" style="padding:4px 12px;font-size:10px;border-radius:3px;cursor:pointer;background:transparent;border:1px solid var(--red);color:var(--red)" onclick="setTradingMode('LIVE')">LIVE</button>
+        </div>
+        <div id="tm-graduation-msg" style="margin-top:6px;font-size:10px;color:var(--muted);display:none"></div>
+      </div>
+
       <!-- PnL summary -->
       <div class="card">
         <div class="card-title">P&amp;L Summary</div>
@@ -1472,6 +1490,127 @@ async function setMode(mode) {
 }
 
 // ═══════════════════════════════════════════════════════
+// Trading Mode & Paper Equity
+// ═══════════════════════════════════════════════════════
+let currentTradingMode = 'PAPER';
+let currentConfScore = 0;
+
+async function loadTradingMode() {
+  try {
+    const [modeR, eqR] = await Promise.all([
+      fetch('/api/paper/mode', { headers: authHeaders() }),
+      fetch('/api/paper/equity', { headers: authHeaders() }),
+    ]);
+    if (modeR.ok) {
+      const d = await modeR.json();
+      currentTradingMode = (d.mode || 'PAPER').toUpperCase();
+      updateTradingModeUI();
+    }
+    if (eqR.ok) {
+      const eq = await eqR.json();
+      const initial = parseFloat(eq.initial_capital_usd) || 100000;
+      const current = parseFloat(eq.current_equity_usd) || initial;
+      const deployed = parseFloat(eq.deployed_usd) || 0;
+      const available = current - deployed;
+      const col = current >= initial ? 'var(--green)' : 'var(--red)';
+      const el = document.getElementById('tm-balance');
+      if (el) { el.textContent = fmtUSD(current); el.style.color = col; }
+      setVal('tm-initial', fmtUSD(initial));
+      setVal('tm-deployed', fmtUSD(deployed));
+      const avEl = document.getElementById('tm-available');
+      if (avEl) { avEl.textContent = fmtUSD(available); avEl.style.color = available > 0 ? 'var(--green)' : 'var(--red)'; }
+    }
+  } catch(e) { console.warn('loadTradingMode:', e); }
+}
+
+function updateTradingModeUI() {
+  const modeColors = { PAPER: 'var(--yellow)', SHADOW: 'var(--orange)', LIVE: 'var(--green)' };
+  const col = modeColors[currentTradingMode] || 'var(--muted)';
+  const label = document.getElementById('trading-mode-label');
+  if (label) { label.textContent = currentTradingMode; label.style.color = col; }
+  // Highlight active button.
+  ['PAPER','SHADOW','LIVE'].forEach(m => {
+    const btn = document.getElementById('tm-btn-' + m.toLowerCase());
+    if (btn) {
+      const active = m === currentTradingMode;
+      btn.style.background = active ? (modeColors[m] || 'var(--muted)') : 'transparent';
+      btn.style.color = active ? 'var(--bg)' : (modeColors[m] || 'var(--muted)');
+    }
+  });
+  // Update header badge.
+  const badge = document.getElementById('paper-badge');
+  if (badge) {
+    if (currentTradingMode === 'PAPER') {
+      badge.style.display = '';
+      badge.textContent = 'PAPER';
+      badge.style.background = 'rgba(245,158,11,.12)';
+      badge.style.borderColor = 'rgba(245,158,11,.3)';
+      badge.style.color = 'var(--yellow)';
+    } else if (currentTradingMode === 'SHADOW') {
+      badge.style.display = '';
+      badge.textContent = 'SHADOW';
+      badge.style.background = 'rgba(249,115,22,.12)';
+      badge.style.borderColor = 'rgba(249,115,22,.3)';
+      badge.style.color = 'var(--orange)';
+    } else if (currentTradingMode === 'LIVE') {
+      badge.style.display = '';
+      badge.textContent = 'LIVE';
+      badge.style.background = 'rgba(34,197,94,.12)';
+      badge.style.borderColor = 'rgba(34,197,94,.3)';
+      badge.style.color = 'var(--green)';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+  // Graduation message.
+  const msg = document.getElementById('tm-graduation-msg');
+  if (msg) {
+    if (currentTradingMode === 'PAPER' && currentConfScore < 50) {
+      msg.style.display = '';
+      msg.textContent = 'Confidence score must reach 50 before graduating to SHADOW mode.';
+    } else if (currentTradingMode === 'PAPER' && currentConfScore >= 50) {
+      msg.style.display = '';
+      msg.textContent = 'Score ' + currentConfScore + ' — eligible for SHADOW mode.';
+      msg.style.color = 'var(--green)';
+    } else if (currentTradingMode === 'SHADOW' && currentConfScore < 80) {
+      msg.style.display = '';
+      msg.textContent = 'Confidence score must reach 80 before graduating to LIVE mode.';
+      msg.style.color = 'var(--muted)';
+    } else if (currentTradingMode === 'SHADOW' && currentConfScore >= 80) {
+      msg.style.display = '';
+      msg.textContent = 'Score ' + currentConfScore + ' — eligible for LIVE mode.';
+      msg.style.color = 'var(--green)';
+    } else {
+      msg.style.display = 'none';
+    }
+  }
+}
+
+async function setTradingMode(mode) {
+  const warnings = {
+    SHADOW: 'Switch to SHADOW mode? Trades will mirror live markets but with simulated fills.',
+    LIVE: 'Switch to LIVE mode? This will execute REAL trades with REAL money. Are you sure?',
+    PAPER: 'Switch back to PAPER mode? All positions will be simulated.',
+  };
+  if (!confirm(warnings[mode] || ('Switch to ' + mode + '?'))) return;
+  try {
+    const r = await fetch('/api/paper/mode', {
+      method: 'PUT',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: mode }),
+    });
+    if (r.ok) {
+      currentTradingMode = mode;
+      updateTradingModeUI();
+      loadTradingMode();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      alert('Failed: ' + (err.error || r.statusText));
+    }
+  } catch(e) { alert('Error: ' + e); }
+}
+
+// ═══════════════════════════════════════════════════════
 // P&L tab
 // ═══════════════════════════════════════════════════════
 async function loadPnL() {
@@ -1790,12 +1929,16 @@ async function loadHome() {
     }
   } catch(e) { console.warn('loadHome/pnl:', e); }
 
+  // Load trading mode and paper equity.
+  loadTradingMode();
+
   // Load confidence.
   try {
     const r = await fetch('/api/paper/confidence', { headers: authHeaders() });
     if (r.ok) {
       const d = await r.json();
       const score = parseFloat(d.score) || 0;
+      currentConfScore = score;
       const col = score >= 80 ? 'var(--green)' : score >= 50 ? 'var(--yellow)' : 'var(--red)';
       const el = document.getElementById('home-conf-score');
       if (el) { el.textContent = score.toFixed(0); el.style.color = col; }
@@ -1807,6 +1950,8 @@ async function loadHome() {
       if (chkS) { chkS.textContent = score >= 50 ? '✓' : '○'; chkS.style.color = score >= 50 ? 'var(--green)' : 'var(--muted)'; }
       const chkL = document.getElementById('chk-live');
       if (chkL) { chkL.textContent = score >= 80 ? '✓' : '○'; chkL.style.color = score >= 80 ? 'var(--green)' : 'var(--muted)'; }
+      // Update graduation message with current score.
+      updateTradingModeUI();
     }
   } catch(e) { console.warn('loadHome/conf:', e); }
 
