@@ -61,5 +61,5 @@ jobs:
         run: |
           for df in Dockerfile Dockerfile.*; do
             echo "Building $df..."
-            docker build -f "$df" -t "test-$(basename $df | tr '.' '-')" .
+            docker build -f "$df" -t "test-$(basename $df | tr '.' '-' | tr 'A-Z' 'a-z')" .
           done
