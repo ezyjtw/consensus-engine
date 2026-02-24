@@ -314,11 +314,9 @@ func (e *Engine) detectConvergence(input PredictionInput) *Signal {
 
 	// Find max divergence between venues
 	var mids []float64
-	var venues []string
-	for v, m := range input.VenueMids {
+	for _, m := range input.VenueMids {
 		if m > 0 {
 			mids = append(mids, m)
-			venues = append(venues, v)
 		}
 	}
 

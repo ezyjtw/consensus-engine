@@ -3,7 +3,6 @@
 package onchain
 
 import (
-	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
 	"math/big"
@@ -37,11 +36,9 @@ type WalletConfig struct {
 type Wallet struct {
 	mu           sync.Mutex
 	address      string
-	chainID      ChainID
 	nonces       map[ChainID]uint64
 	pendingTxs   map[string]*PendingTx // txHash → pending
 	maxPending   int
-	privKey      *ecdsa.PrivateKey // nil in read-only mode
 	rpcEndpoints map[ChainID]string
 	gasConfig    GasConfig
 }

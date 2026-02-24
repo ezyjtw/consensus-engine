@@ -1405,7 +1405,7 @@ func (gw *Gateway) handlePipelineLatency(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleRegimeState(w http.ResponseWriter, r *http.Request) {
@@ -1419,7 +1419,7 @@ func (gw *Gateway) handleRegimeState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleOpportunities(w http.ResponseWriter, r *http.Request) {
@@ -1457,7 +1457,7 @@ func (gw *Gateway) handleInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleSlippageCurves(w http.ResponseWriter, r *http.Request) {
@@ -1472,7 +1472,7 @@ func (gw *Gateway) handleSlippageCurves(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleLeaderStats(w http.ResponseWriter, r *http.Request) {
@@ -1487,7 +1487,7 @@ func (gw *Gateway) handleLeaderStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleOptimizerParams(w http.ResponseWriter, r *http.Request) {
@@ -1498,7 +1498,7 @@ func (gw *Gateway) handleOptimizerParams(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleVenueScores(w http.ResponseWriter, r *http.Request) {
@@ -1509,7 +1509,7 @@ func (gw *Gateway) handleVenueScores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func parseJSONList(items []string) []json.RawMessage {
@@ -1545,7 +1545,7 @@ func (gw *Gateway) handleYieldOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleYieldSources(w http.ResponseWriter, r *http.Request) {
@@ -1556,7 +1556,7 @@ func (gw *Gateway) handleYieldSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleYieldPortfolio(w http.ResponseWriter, r *http.Request) {
@@ -1570,7 +1570,7 @@ func (gw *Gateway) handleYieldPortfolio(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleOnchainTxs(w http.ResponseWriter, r *http.Request) {
@@ -1598,7 +1598,7 @@ func (gw *Gateway) handleOnchainWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleBridgeTransfers(w http.ResponseWriter, r *http.Request) {
@@ -1612,7 +1612,7 @@ func (gw *Gateway) handleBridgeTransfers(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleBridgeAlerts(w http.ResponseWriter, r *http.Request) {
@@ -1623,7 +1623,7 @@ func (gw *Gateway) handleBridgeAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleKeeperStats(w http.ResponseWriter, r *http.Request) {
@@ -1639,7 +1639,7 @@ func (gw *Gateway) handleKeeperStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleKeeperCandidates(w http.ResponseWriter, r *http.Request) {
@@ -1650,7 +1650,7 @@ func (gw *Gateway) handleKeeperCandidates(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleDEXPools(w http.ResponseWriter, r *http.Request) {
@@ -1664,7 +1664,7 @@ func (gw *Gateway) handleDEXPools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleDeFiRisk(w http.ResponseWriter, r *http.Request) {
@@ -1678,7 +1678,7 @@ func (gw *Gateway) handleDeFiRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleDepegAlerts(w http.ResponseWriter, r *http.Request) {
@@ -1689,7 +1689,7 @@ func (gw *Gateway) handleDepegAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleMakerRebateReport(w http.ResponseWriter, r *http.Request) {
@@ -1703,7 +1703,7 @@ func (gw *Gateway) handleMakerRebateReport(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func (gw *Gateway) handleTriangularOpps(w http.ResponseWriter, r *http.Request) {
@@ -1714,7 +1714,7 @@ func (gw *Gateway) handleTriangularOpps(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(data))
+	_, _ = w.Write([]byte(data))
 }
 
 func extractData(msgs []redis.XMessage) []string {
