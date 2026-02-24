@@ -449,7 +449,10 @@ func (e *Engine) reconcile(ctx context.Context) ReconciliationReport {
 			fmt.Sprintf("treasury:expected:%s:%s", e.cfg.TenantID, venue))
 		if expectedStr != "" {
 			var expected float64
-			fmt.Sscanf(expectedStr, "%f", &expected)
+			if _, err := fmt.Sscanf(expectedStr, "%f", &expected); err != nil {
+				log.Printf("treasury: invalid expected value for %s: %v", venue, err)
+				continue
+			}
 			vr.ExpectedUSD = expected
 			vr.DriftUSD = balUSD - expected
 			if expected > 0 {
