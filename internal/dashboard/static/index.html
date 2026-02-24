@@ -464,6 +464,7 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
     <div class="tab" data-tab="kill" onclick="switchTab('kill')">KILL SWITCH</div>
     <div class="tab" data-tab="alerts" onclick="switchTab('alerts')">ALERTS</div>
     <div class="tab" data-tab="audit" onclick="switchTab('audit')">AUDIT</div>
+    <div class="tab admin-only" data-tab="config" onclick="switchTab('config')">CONFIG</div>
     <div class="tab admin-only" data-tab="apikeys" onclick="switchTab('apikeys')">API KEYS</div>
   </div>
 
@@ -858,7 +859,7 @@ function switchTab(name) {
   document.querySelectorAll('.mobile-nav-btn').forEach(b => {
     b.classList.toggle('active', b.id === 'mnav-' + name);
   });
-  const allTabs = ['home','live','timeline','connections','kill','alerts','risk','pnl','positions','funding','orders','audit','apikeys'];
+  const allTabs = ['home','live','timeline','connections','kill','alerts','risk','pnl','positions','funding','orders','audit','config','apikeys'];
   allTabs.forEach(t => {
     const el = document.getElementById('tab-' + t);
     if (el) el.style.display = t === name ? '' : 'none';
@@ -873,6 +874,7 @@ function switchTab(name) {
   if (name === 'orders')      loadOrders();
   if (name === 'timeline')    loadTimeline();
   if (name === 'audit')       loadAudit();
+  if (name === 'config')      loadStages();
   if (name === 'apikeys')     loadAPIKeys();
 }
 
@@ -1221,6 +1223,72 @@ async function saveConn(exchange) {
     if (secEl)  secEl.value  = '';
     if (passEl) passEl.value = '';
     loadConnections(); // refresh dots
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// Funding Stages (CONFIG tab)
+// ═══════════════════════════════════════════════════════
+const FUNDING_SYMBOLS = ['BTC-PERP','ETH-PERP','SOL-PERP','DOGE-PERP','XRP-PERP','AVAX-PERP','LINK-PERP','SUI-PERP','PEPE-PERP'];
+const STAGE_ORDER = ['OBSERVE','PAPER','CONSERVATIVE','FULL'];
+const STAGE_COLORS = {OBSERVE:'var(--muted)',PAPER:'var(--yellow)',CONSERVATIVE:'var(--orange)',FULL:'var(--green)'};
+
+async function loadStages() {
+  const r = await fetch('/api/config/stages', { headers: authHeaders() });
+  if (!r.ok) return;
+  const entries = await r.json();
+  const stageMap = {};
+  (entries || []).forEach(e => { stageMap[e.symbol] = e.stage; });
+  renderStages(stageMap);
+}
+
+function renderStages(stageMap) {
+  const tbody = document.getElementById('stages-tbody');
+  tbody.innerHTML = '';
+  FUNDING_SYMBOLS.forEach(sym => {
+    const stage = stageMap[sym] || 'FULL';
+    const idx = STAGE_ORDER.indexOf(stage);
+    const canPromote = idx < STAGE_ORDER.length - 1;
+    const canDemote = idx > 0;
+    const nextStage = canPromote ? STAGE_ORDER[idx + 1] : null;
+    const prevStage = canDemote ? STAGE_ORDER[idx - 1] : null;
+    const color = STAGE_COLORS[stage] || 'var(--text)';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:bold">${sym}</td>
+      <td><span style="color:${color};font-weight:bold">${stage}</span></td>
+      <td style="display:flex;gap:6px">
+        <select id="stage-sel-${sym}" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-family:var(--mono);font-size:11px">
+          ${STAGE_ORDER.map(s => `<option value="${s}" ${s===stage?'selected':''}>${s}</option>`).join('')}
+        </select>
+        <button class="btn-sm btn-save" onclick="setStage('${sym}')" style="padding:4px 10px;font-size:10px">SET</button>
+      </td>
+      <td style="display:flex;gap:4px">
+        ${canPromote ? `<button class="btn-sm" style="padding:3px 8px;font-size:10px;background:transparent;border:1px solid var(--green);color:var(--green);border-radius:3px;cursor:pointer" onclick="promoteStage('${sym}','${nextStage}')">&#9650; ${nextStage}</button>` : ''}
+        ${canDemote ? `<button class="btn-sm" style="padding:3px 8px;font-size:10px;background:transparent;border:1px solid var(--red);color:var(--red);border-radius:3px;cursor:pointer" onclick="promoteStage('${sym}','${prevStage}')">&#9660; ${prevStage}</button>` : ''}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function setStage(symbol) {
+  const sel = document.getElementById('stage-sel-' + symbol);
+  const stage = sel.value;
+  await promoteStage(symbol, stage);
+}
+
+async function promoteStage(symbol, stage) {
+  const r = await fetch('/api/config/stages/' + encodeURIComponent(symbol), {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stage }),
+  });
+  if (r.ok) {
+    loadStages();
+  } else {
+    const err = await r.json().catch(() => ({}));
+    alert('Failed: ' + (err.error || r.statusText));
   }
 }
 
@@ -2262,6 +2330,30 @@ async function saveBranding() {
       <table id="audit-table">
         <thead><tr><th>Time</th><th>Actor</th><th>Role</th><th>IP</th><th>Action</th><th>Payload</th></tr></thead>
         <tbody id="audit-tbody"><tr><td colspan="6" class="empty-state">Loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ─── CONFIG (admin only) ──────────────────────────── -->
+  <div id="tab-config" class="content admin-only" style="display:none">
+    <div class="card">
+      <div class="card-title">Funding Stage Management</div>
+      <div style="margin-bottom:14px;font-size:11px;color:var(--muted)">
+        Promote or demote symbols through funding stages. Changes take effect on the next evaluation cycle (no restart required).<br>
+        <span style="color:var(--text)">OBSERVE</span> &rarr; <span style="color:var(--yellow)">PAPER</span> &rarr; <span style="color:var(--orange)">CONSERVATIVE</span> &rarr; <span style="color:var(--green)">FULL</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Current Stage</th>
+            <th>Action</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="stages-tbody">
+          <tr><td colspan="4" class="empty-state">Loading&hellip;</td></tr>
+        </tbody>
       </table>
     </div>
   </div>

@@ -90,17 +90,31 @@ done
 # ── 4. Consensus engine output ─────────────────────────────────────────────
 echo ""
 echo "3. Consensus engine output"
-for STREAM in consensus:updates consensus:anomalies consensus:status; do
-  LEN=$(rcli XLEN "$STREAM" 2>/dev/null || echo 0)
+# The consensus engine's consumer group starts at "$" (new messages only), so
+# it needs a few seconds after startup to receive fresh quotes and produce
+# output. Wait up to WAIT_SECS for consensus:updates to appear.
+CONSENSUS_FOUND=0
+for i in $(seq 1 $WAIT_SECS); do
+  LEN=$(rcli XLEN consensus:updates 2>/dev/null || echo 0)
   if [[ "$LEN" -gt 0 ]]; then
-    ok "$STREAM has $LEN messages"
-    # Show latest message fields
-    LAST=$(rcli XREVRANGE "$STREAM" + - COUNT 1 2>/dev/null || true)
+    ok "consensus:updates has $LEN messages"
+    CONSENSUS_FOUND=1
+    LAST=$(rcli XREVRANGE consensus:updates + - COUNT 1 2>/dev/null || true)
     if [[ -n "$LAST" ]]; then
       info "Latest: $(echo "$LAST" | grep -o '"[a-z_]*":[^,}]*' | head -4 | tr '\n' '  ' || echo "$LAST" | head -2 | tail -1)"
     fi
+    break
+  fi
+  sleep 1
+  [[ $i -eq $WAIT_SECS ]] && fail "consensus:updates still empty after ${WAIT_SECS}s — consensus engine may not be running"
+done
+# Anomalies and status transitions are optional (only emitted on outlier/state changes).
+for STREAM in consensus:anomalies consensus:status; do
+  LEN=$(rcli XLEN "$STREAM" 2>/dev/null || echo 0)
+  if [[ "$LEN" -gt 0 ]]; then
+    ok "$STREAM has $LEN messages"
   else
-    fail "$STREAM is empty — consensus engine may not be running or market:quotes not flowing"
+    info "$STREAM empty (no anomalies/transitions triggered — normal in stable markets)"
   fi
 done
 
