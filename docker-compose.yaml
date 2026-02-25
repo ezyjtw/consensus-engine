@@ -227,6 +227,10 @@ services:
       # REQUIRED — generate with: openssl rand -hex 32
       DASHBOARD_MASTER_KEY: "${DASHBOARD_MASTER_KEY}"
       DASHBOARD_AUTH_TOKEN: "${DASHBOARD_AUTH_TOKEN:-}"
+      # Serve index.html from filesystem for hot-reload (remove for production).
+      DASHBOARD_STATIC_DIR: "/static"
+    volumes:
+      - ./internal/dashboard/static:/static:ro
 
 volumes:
   redis_data:

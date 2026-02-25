@@ -135,7 +135,9 @@ func (s *Server) resolveKey(r *http.Request) *auth.APIKey {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(indexHTML)
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	_, _ = w.Write(getIndexHTML())
 }
 
 // --- Connections ---
