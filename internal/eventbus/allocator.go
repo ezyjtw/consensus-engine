@@ -151,6 +151,18 @@ func (b *AllocatorBus) SystemMode(ctx context.Context) string {
 	return mode
 }
 
+// ReadConsensusQuality returns the latest consensus quality for a given
+// tenant+symbol (e.g. "HIGH", "MED", "LOW"). Returns fallback if the key is
+// absent (consensus engine hasn't published yet).
+func (b *AllocatorBus) ReadConsensusQuality(ctx context.Context, tenantID, symbol, fallback string) string {
+	key := "consensus:quality:" + tenantID + ":" + symbol
+	q := b.sc.GetString(ctx, key)
+	if q == "" {
+		return fallback
+	}
+	return q
+}
+
 // KillSwitchActive returns true when the kill switch is engaged.
 func (b *AllocatorBus) KillSwitchActive(ctx context.Context) bool {
 	return b.sc.KillSwitchActive(ctx)

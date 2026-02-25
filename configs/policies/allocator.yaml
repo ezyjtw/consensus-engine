@@ -15,6 +15,7 @@ per_strategy_max_usd:
   CORRELATION_BREAK: 50000
   DEX_CEX_ARB: 50000
   L2_BRIDGE_ARB: 25000
+  MANUAL: 100000
   # Exit strategies inherit from their parent strategy caps.
   FUNDING_CARRY_EXIT: 200000
   FUNDING_DIFFERENTIAL_EXIT: 150000
@@ -25,6 +26,8 @@ per_venue_max_usd:
   okx: 150000
   bybit: 150000
   deribit: 100000
+  htx: 50000
+  gate: 50000
 
 # Gate all new intents when margin utilisation exceeds this on any venue.
 margin_utilisation_gate_pct: 75.0

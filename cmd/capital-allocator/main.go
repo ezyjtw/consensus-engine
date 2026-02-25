@@ -183,8 +183,16 @@ func main() {
 		}
 
 		mode := bus.SystemMode(ctx)
+		tenantID := os.Getenv("TENANT_ID")
+		if tenantID == "" {
+			tenantID = "default"
+		}
 		for _, intent := range intents {
-			quality := intent.Constraints.MinQuality
+			tid := intent.TenantID
+			if tid == "" {
+				tid = tenantID
+			}
+			quality := bus.ReadConsensusQuality(ctx, tid, intent.Symbol, "MED")
 			outcome := engine.Evaluate(intent, mode, quality)
 			if !outcome.Approved {
 				continue

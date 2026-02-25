@@ -243,6 +243,8 @@ func (e *Engine) minQualityForStrategy(strategy string) string {
 		return e.policy.MinQualityForFunding
 	case "SPREAD_CAPTURE", "LIQUIDATION_CONTRA", "CASCADE_CONTRA", "CORRELATION_BREAK":
 		return e.policy.MinQualityForLiquidity
+	case "MANUAL":
+		return "" // manual trades bypass the consensus quality gate
 	default:
 		return "HIGH"
 	}
@@ -262,8 +264,10 @@ func qualityRank(q string) int {
 		return 2
 	case "MED":
 		return 1
-	default:
+	case "LOW":
 		return 0
+	default:
+		return -1
 	}
 }
 

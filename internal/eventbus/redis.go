@@ -116,10 +116,17 @@ func (b *Bus) PublishConsensus(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	return b.rdb.XAdd(ctx, &redis.XAddArgs{
+	if err := b.rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: b.cfg.OutputConsensus,
 		Values: map[string]interface{}{"data": string(data)},
-	}).Err()
+	}).Err(); err != nil {
+		return err
+	}
+	// Cache quality per symbol so downstream services (e.g. capital allocator)
+	// can look up current consensus quality without consuming the full stream.
+	qKey := "consensus:quality:" + u.TenantID + ":" + string(u.Symbol)
+	b.rdb.Set(ctx, qKey, u.Consensus.Quality, 5*time.Minute) //nolint:errcheck
+	return nil
 }
 
 func (b *Bus) PublishAnomaly(ctx context.Context,
