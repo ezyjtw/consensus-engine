@@ -44,6 +44,9 @@ type Engine struct {
 	// when a funding rate sign change is detected, so the main loop can
 	// immediately evaluate exits instead of waiting for the next eval tick.
 	ExitSignalC chan struct{}
+	// nowFunc overrides the time source for Evaluate/EvaluateExits. Used in
+	// tests to provide deterministic timestamps. Nil means use time.Now().
+	nowFunc func() time.Time
 }
 
 func NewEngine(p *Policy) *Engine {
@@ -137,12 +140,20 @@ func (e *Engine) Regime(venue, symbol string) *Regime {
 	return e.forecaster.Get(venue, symbol)
 }
 
+// now returns the current time, or a test-injected time if nowFunc is set.
+func (e *Engine) now() time.Time {
+	if e.nowFunc != nil {
+		return e.nowFunc()
+	}
+	return time.Now()
+}
+
 // Evaluate checks all configured strategies and returns any qualifying intents.
 func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	now := time.Now()
+	now := e.now()
 	nowMs := now.UnixMilli()
 	var intents []arb.TradeIntent
 

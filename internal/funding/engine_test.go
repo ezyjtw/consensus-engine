@@ -28,10 +28,12 @@ func testFundingPolicy() *Policy {
 // configured to avoid nearReset interference.
 func setupEngine(p *Policy) *Engine {
 	e := NewEngine(p)
-	// Set reset hours far from current time to avoid nearReset blocking intents.
-	h := time.Now().UTC().Hour()
-	safeHour := (h + 4) % 24
-	e.scheduler = &FundingScheduler{resetHours: []int{safeHour}}
+	// Use a deterministic time that's never near a reset: 02:00 UTC is
+	// 6 hours after the 00:00 reset and 6 hours before the 08:00 reset,
+	// well outside the 30-minute near-reset window.
+	fixedNow := time.Date(2025, 6, 15, 2, 0, 0, 0, time.UTC)
+	e.scheduler = &FundingScheduler{resetHours: []int{0, 8, 16}}
+	e.nowFunc = func() time.Time { return fixedNow }
 	return e
 }
 
@@ -502,10 +504,11 @@ func TestExitSignal_NearResetNegative(t *testing.T) {
 	p := testFundingPolicy()
 	e := setupEngine(p)
 
-	// Set reset to happen 10 minutes from now so IsNearReset(30min) = true.
-	now := time.Now().UTC()
-	resetHour := now.Add(10 * time.Minute).Hour()
-	e.scheduler = &FundingScheduler{resetHours: []int{resetHour}}
+	// Use a deterministic time: 15:50 UTC is 10 minutes before the 16:00
+	// reset, well within the 30-minute near-reset window.
+	e.scheduler = &FundingScheduler{resetHours: []int{0, 8, 16}}
+	fixedNow := time.Date(2025, 6, 15, 15, 50, 0, 0, time.UTC)
+	e.nowFunc = func() time.Time { return fixedNow }
 
 	// Current rate is negative and we're near reset.
 	injectVenueData(e, "BTC-PERP", "binance", -0.00005, 100000, 4.0)
@@ -637,22 +640,19 @@ func TestNearResetBlocksNewEntry(t *testing.T) {
 	p := testFundingPolicy()
 	e := NewEngine(p)
 
-	// Set scheduler with a reset at every hour so the next reset is always
-	// less than 60 minutes away. With 30-minute near-reset window, this
-	// triggers if we're past minute 30 of the current hour. If we happen to
-	// be in the first 30 min, the next reset (top of next hour) is >30 min away,
-	// so we use a denser schedule. Setting all 24 hours guarantees <60 min.
-	// Alternatively, we can set resets every hour. For reliability, we set the
-	// next hour from now as a reset, and check if it's within 30 min.
-	now := time.Now().UTC()
-	nextHour := (now.Hour() + 1) % 24
-	e.scheduler = &FundingScheduler{resetHours: []int{nextHour}}
+	// Use a deterministic time: 07:45 UTC is 15 minutes before the 08:00
+	// reset, well within the 30-minute near-reset window. This avoids
+	// flakiness from depending on the real wall clock.
+	e.scheduler = &FundingScheduler{resetHours: []int{0, 8, 16}}
+	fixedNow := time.Date(2025, 6, 15, 7, 45, 0, 0, time.UTC)
 
-	// Only run the assertion if we're actually in the near-reset window.
-	if !e.scheduler.IsNearReset(now, 30*time.Minute) {
-		t.Skip("current minute position >30 min from next hour boundary; near-reset test not applicable")
-		return
+	// Verify our setup: must be within 30 min of next reset.
+	if !e.scheduler.IsNearReset(fixedNow, 30*time.Minute) {
+		t.Fatal("test setup error: fixedNow should be near reset")
 	}
+
+	// Override the engine's time source so Evaluate uses our fixed time.
+	e.nowFunc = func() time.Time { return fixedNow }
 
 	injectVenueData(e, "BTC-PERP", "binance", highYieldRate(), 100000, 4.0)
 	intents := e.Evaluate("t1")
