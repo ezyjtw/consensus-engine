@@ -33,6 +33,7 @@ func NewServer(store *Store, sse *StreamHandler, alerts *AlertWorker, authToken 
 		mux:       http.NewServeMux(),
 	}
 	s.routes()
+	s.RegisterStrategyRoutes()
 	return s
 }
 
