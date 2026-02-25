@@ -7,11 +7,18 @@ sim_latency_ms: 50
 adverse_selection_bps: 10.0
 
 # Per-venue simulation profiles for realistic paper fills.
-# latency: observed REST API round-trip range
-# slippage_bps: base slippage for small orders
-# depth_slope_bps: additional bps per $10k notional (larger orders = more slippage)
-# fee_bps_taker: taker fee for this venue
-# partial_fill_pct: probability of partial fill (0.0-1.0)
+# IMPORTANT: fee_bps_taker and fee_bps_maker should match your actual exchange
+# fee tier. Check your 30-day volume tier and token discount (BNB, OKB, etc.)
+# and update these values accordingly. Defaults assume base tier, no discounts.
+#
+# Reference fee schedules (perpetual futures, base tier, as of 2025-Q1):
+#   Venue     Maker    Taker    Notes
+#   Binance   2.0 bps  4.5 bps  USDT-M futures; -10% with BNB discount
+#   OKX       2.0 bps  5.0 bps  USDT-M perps; -15% with OKB
+#   Bybit     2.0 bps  5.5 bps  USDT perps
+#   Deribit   0.0 bps  3.0 bps  BTC/ETH perps; maker rebate at higher tiers
+#   HTX       2.0 bps  5.0 bps  USDT-M; -10% with HT
+#   Gate      2.0 bps  5.0 bps  USDT perps; -25% with GT
 venue_profiles:
   binance:
     latency_min_ms: 8
@@ -19,6 +26,7 @@ venue_profiles:
     slippage_bps: 2.0
     depth_slope_bps: 0.5
     fee_bps_taker: 4.5
+    fee_bps_maker: 2.0
     partial_fill_pct: 0.05
   okx:
     latency_min_ms: 15
@@ -26,6 +34,7 @@ venue_profiles:
     slippage_bps: 3.0
     depth_slope_bps: 0.8
     fee_bps_taker: 5.0
+    fee_bps_maker: 2.0
     partial_fill_pct: 0.08
   bybit:
     latency_min_ms: 12
@@ -33,6 +42,7 @@ venue_profiles:
     slippage_bps: 3.0
     depth_slope_bps: 0.7
     fee_bps_taker: 5.5
+    fee_bps_maker: 2.0
     partial_fill_pct: 0.07
   deribit:
     latency_min_ms: 25
@@ -40,7 +50,24 @@ venue_profiles:
     slippage_bps: 4.0
     depth_slope_bps: 1.2
     fee_bps_taker: 3.0
+    fee_bps_maker: 0.0
     partial_fill_pct: 0.10
+  htx:
+    latency_min_ms: 18
+    latency_max_ms: 45
+    slippage_bps: 3.5
+    depth_slope_bps: 1.0
+    fee_bps_taker: 5.0
+    fee_bps_maker: 2.0
+    partial_fill_pct: 0.09
+  gate:
+    latency_min_ms: 20
+    latency_max_ms: 50
+    slippage_bps: 3.5
+    depth_slope_bps: 1.0
+    fee_bps_taker: 5.0
+    fee_bps_maker: 2.0
+    partial_fill_pct: 0.09
 
 # Live execution safety.
 max_retries_per_leg: 3

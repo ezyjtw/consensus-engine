@@ -8,12 +8,16 @@ import (
 )
 
 // VenueProfile holds per-venue simulation parameters for realistic paper fills.
+// Fee rates should reflect the actual fee tier on each exchange — check your
+// account's 30-day volume tier and token discount (e.g. BNB on Binance,
+// OKB on OKX) and update accordingly. Defaults assume base tier, no discounts.
 type VenueProfile struct {
 	LatencyMinMs   int64   `yaml:"latency_min_ms"`   // minimum latency in ms
 	LatencyMaxMs   int64   `yaml:"latency_max_ms"`   // maximum latency in ms
 	SlippageBps    float64 `yaml:"slippage_bps"`     // base slippage for small orders
 	DepthSlopeBps  float64 `yaml:"depth_slope_bps"`  // additional bps per $10k notional
-	FeeBpsTaker    float64 `yaml:"fee_bps_taker"`    // taker fee in bps
+	FeeBpsTaker    float64 `yaml:"fee_bps_taker"`    // taker fee in bps (crossing the spread)
+	FeeBpsMaker    float64 `yaml:"fee_bps_maker"`    // maker fee in bps (resting limit order)
 	PartialFillPct float64 `yaml:"partial_fill_pct"` // probability of partial fill (0-1)
 }
 
@@ -118,13 +122,28 @@ func LoadConfig(path string) (*Config, error) {
 	return &c, nil
 }
 
-// defaultVenueProfiles returns realistic per-venue simulation parameters.
+// defaultVenueProfiles returns per-venue simulation parameters.
+// Fee rates are base-tier (no volume discount, no token discount).
+// Override via execution_router.yaml venue_profiles to match your actual tier.
+//
+// Reference fee schedules (perpetual futures, base tier, as of 2025-Q1):
+//
+//	Venue     Maker    Taker    Notes
+//	Binance   2.0 bps  4.5 bps  USDT-M futures; -10% with BNB
+//	OKX       2.0 bps  5.0 bps  USDT-M perps; -15% with OKB
+//	Bybit     2.0 bps  5.5 bps  USDT perps
+//	Deribit   0.0 bps  3.0 bps  BTC/ETH perps; maker rebate at higher tiers
+//	Coinbase  4.0 bps  6.0 bps  Perps (Intl)
+//	HTX       2.0 bps  5.0 bps  USDT-M; -10% with HT
+//	Gate      2.0 bps  5.0 bps  USDT perps; -25% with GT
 func defaultVenueProfiles() map[string]VenueProfile {
 	return map[string]VenueProfile{
-		"binance": {LatencyMinMs: 8, LatencyMaxMs: 25, SlippageBps: 2.0, DepthSlopeBps: 0.5, FeeBpsTaker: 4.5, PartialFillPct: 0.05},
-		"okx":     {LatencyMinMs: 15, LatencyMaxMs: 40, SlippageBps: 3.0, DepthSlopeBps: 0.8, FeeBpsTaker: 5.0, PartialFillPct: 0.08},
-		"bybit":   {LatencyMinMs: 12, LatencyMaxMs: 35, SlippageBps: 3.0, DepthSlopeBps: 0.7, FeeBpsTaker: 5.5, PartialFillPct: 0.07},
-		"deribit": {LatencyMinMs: 25, LatencyMaxMs: 60, SlippageBps: 4.0, DepthSlopeBps: 1.2, FeeBpsTaker: 3.0, PartialFillPct: 0.10},
-		"coinbase":{LatencyMinMs: 20, LatencyMaxMs: 50, SlippageBps: 5.0, DepthSlopeBps: 1.5, FeeBpsTaker: 6.0, PartialFillPct: 0.12},
+		"binance":  {LatencyMinMs: 8, LatencyMaxMs: 25, SlippageBps: 2.0, DepthSlopeBps: 0.5, FeeBpsTaker: 4.5, FeeBpsMaker: 2.0, PartialFillPct: 0.05},
+		"okx":      {LatencyMinMs: 15, LatencyMaxMs: 40, SlippageBps: 3.0, DepthSlopeBps: 0.8, FeeBpsTaker: 5.0, FeeBpsMaker: 2.0, PartialFillPct: 0.08},
+		"bybit":    {LatencyMinMs: 12, LatencyMaxMs: 35, SlippageBps: 3.0, DepthSlopeBps: 0.7, FeeBpsTaker: 5.5, FeeBpsMaker: 2.0, PartialFillPct: 0.07},
+		"deribit":  {LatencyMinMs: 25, LatencyMaxMs: 60, SlippageBps: 4.0, DepthSlopeBps: 1.2, FeeBpsTaker: 3.0, FeeBpsMaker: 0.0, PartialFillPct: 0.10},
+		"coinbase": {LatencyMinMs: 20, LatencyMaxMs: 50, SlippageBps: 5.0, DepthSlopeBps: 1.5, FeeBpsTaker: 6.0, FeeBpsMaker: 4.0, PartialFillPct: 0.12},
+		"htx":      {LatencyMinMs: 18, LatencyMaxMs: 45, SlippageBps: 3.5, DepthSlopeBps: 1.0, FeeBpsTaker: 5.0, FeeBpsMaker: 2.0, PartialFillPct: 0.09},
+		"gate":     {LatencyMinMs: 20, LatencyMaxMs: 50, SlippageBps: 3.5, DepthSlopeBps: 1.0, FeeBpsTaker: 5.0, FeeBpsMaker: 2.0, PartialFillPct: 0.09},
 	}
 }

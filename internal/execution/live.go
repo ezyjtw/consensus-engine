@@ -673,13 +673,21 @@ func (e *LiveExecutor) reconcileFills(
 			}
 		}
 
-		// Check fee divergence.
+		// Check fee divergence against exchange-reported fees.
+		// Compare against both maker and taker expected rates to identify
+		// whether the fill rested (maker) or crossed (taker).
 		if order.FeesUSD > 0 {
 			feeDiff := math.Abs(r.feesUSD - order.FeesUSD)
 			if feeDiff > 1.0 { // >$1 fee difference
+				expectedMaker, expectedTaker := 0.0, 0.0
+				if profile, ok := e.cfg.VenueProfiles[r.venue]; ok {
+					expectedMaker = r.filledUSD * profile.FeeBpsMaker / 10000
+					expectedTaker = r.filledUSD * profile.FeeBpsTaker / 10000
+				}
 				log.Printf("live-recon: FEE DIVERGENCE intent=%s leg=%d venue=%s "+
-					"internal=$%.2f exchange=$%.2f",
-					intent.IntentID, i, r.venue, r.feesUSD, order.FeesUSD)
+					"internal=$%.2f exchange=$%.2f (expected maker=$%.2f taker=$%.2f)",
+					intent.IntentID, i, r.venue, r.feesUSD, order.FeesUSD,
+					expectedMaker, expectedTaker)
 			}
 		}
 	}

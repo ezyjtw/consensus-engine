@@ -19,6 +19,7 @@ type ExecutionEvent struct {
 	SlippageBpsActual    float64 `json:"slippage_bps_actual"`
 	SlippageBpsAllowed   float64 `json:"slippage_bps_allowed"`
 	FeesUSDActual        float64 `json:"fees_usd_actual"`
+	FeeType              string  `json:"fee_type,omitempty"` // "maker" or "taker"
 	TsMs                 int64   `json:"ts_ms"`
 	LatencySignalToFillMs int64  `json:"latency_signal_to_fill_ms"`
 	TenantID             string  `json:"tenant_id"`
