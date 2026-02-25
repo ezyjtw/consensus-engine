@@ -82,22 +82,37 @@ venues:
     fee_bps_taker: 5.0
     # Deribit only lists BTC/ETH perpetuals — mid-caps not available.
 
-# Optional venues (uncomment to enable)
-#  htx:
-#    ws_url: "wss://api.hbdm.com/linear-swap-ws"
-#    symbols: ["BTC-USDT", "ETH-USDT"]
-#    symbol_map:
-#      BTC-USDT: "BTC-PERP"
-#      ETH-USDT: "ETH-PERP"
-#    fee_bps_taker: 4.0
-#
-#  gate:
-#    ws_url: "wss://fx-ws.gateio.ws/v4/ws/usdt"
-#    symbols: ["BTC_USDT", "ETH_USDT"]
-#    symbol_map:
-#      BTC_USDT: "BTC-PERP"
-#      ETH_USDT: "ETH-PERP"
-#    fee_bps_taker: 5.0
+  htx:
+    ws_url: "wss://api.hbdm.com/linear-swap-ws"
+    symbols:
+      - "BTC-USDT"
+      - "ETH-USDT"
+      - "SOL-USDT"
+      - "DOGE-USDT"
+      - "XRP-USDT"
+    symbol_map:
+      BTC-USDT: "BTC-PERP"
+      ETH-USDT: "ETH-PERP"
+      SOL-USDT: "SOL-PERP"
+      DOGE-USDT: "DOGE-PERP"
+      XRP-USDT: "XRP-PERP"
+    fee_bps_taker: 4.0
+
+  gate:
+    ws_url: "wss://fx-ws.gateio.ws/v4/ws/usdt"
+    symbols:
+      - "BTC_USDT"
+      - "ETH_USDT"
+      - "SOL_USDT"
+      - "DOGE_USDT"
+      - "XRP_USDT"
+    symbol_map:
+      BTC_USDT: "BTC-PERP"
+      ETH_USDT: "ETH-PERP"
+      SOL_USDT: "SOL-PERP"
+      DOGE_USDT: "DOGE-PERP"
+      XRP_USDT: "XRP-PERP"
+    fee_bps_taker: 5.0
 
 reconnect_backoff_ms: [1000, 2000, 4000, 8000, 16000]
 orderbook_depth: 10

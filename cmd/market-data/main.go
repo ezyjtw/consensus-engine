@@ -105,6 +105,30 @@ func main() {
 				log.Printf("deribit adapter stopped")
 			}()
 
+		case "htx":
+			adapter := marketdata.NewHTXAdapter(
+				venueCfg, pub, cfg.TenantID,
+				cfg.ReconnectBackoffMs, cfg.OrderbookDepth,
+			)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				adapter.Run(ctx)
+				log.Printf("htx adapter stopped")
+			}()
+
+		case "gate":
+			adapter := marketdata.NewGateAdapter(
+				venueCfg, pub, cfg.TenantID,
+				cfg.ReconnectBackoffMs, cfg.OrderbookDepth,
+			)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				adapter.Run(ctx)
+				log.Printf("gate adapter stopped")
+			}()
+
 		default:
 			log.Printf("market-data: WARNING unknown venue %q — skipping", venueName)
 		}

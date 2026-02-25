@@ -607,6 +607,220 @@ select option{background:#0d1525}
 /* ── sections (config, apikeys tabs) ── */
 .alerts-layout{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:700px){.alerts-layout{grid-template-columns:1fr}}
+
+/* ═══════════════════════════════════════════════════
+   FUTURISTIC ENHANCEMENTS
+═══════════════════════════════════════════════════ */
+
+/* ── animated grid background ── */
+@keyframes grid-drift{from{background-position:0 0,0 0}to{background-position:40px 40px,40px 40px}}
+body::before{
+  content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    linear-gradient(rgba(0,212,255,.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,212,255,.03) 1px,transparent 1px);
+  background-size:40px 40px;
+  animation:grid-drift 8s linear infinite;
+}
+
+/* ── subtle scan line overlay ── */
+body::after{
+  content:'';position:fixed;inset:0;z-index:999;pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);
+}
+
+/* ── HUD corner brackets on cards ── */
+.card-hud{position:relative}
+.card-hud::before,.card-hud::after{
+  content:'';position:absolute;width:12px;height:12px;
+  border-color:var(--cyan);border-style:solid;opacity:.4;
+  transition:opacity .3s;pointer-events:none;
+}
+.card-hud::before{top:-1px;left:-1px;border-width:2px 0 0 2px;border-top-left-radius:2px}
+.card-hud::after{bottom:-1px;right:-1px;border-width:0 2px 2px 0;border-bottom-right-radius:2px}
+.card-hud:hover::before,.card-hud:hover::after{opacity:.8}
+
+/* ── animated gradient border for hero cards ── */
+@keyframes border-rotate{from{--angle:0deg}to{--angle:360deg}}
+@property --angle{syntax:'<angle>';initial-value:0deg;inherits:false}
+.card-glow{
+  --angle:0deg;
+  border-image:conic-gradient(from var(--angle),var(--cyan),rgba(0,212,255,.1),var(--cyan)) 1;
+  animation:border-rotate 4s linear infinite;
+}
+
+/* ── exchange health nodes ── */
+.exchange-health-grid{
+  display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px;
+}
+.exchange-node{
+  background:rgba(15,23,42,.7);border:1px solid var(--border);border-radius:10px;
+  padding:14px 10px;text-align:center;position:relative;
+  transition:all .3s;overflow:hidden;
+}
+.exchange-node::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:var(--cyan);opacity:0;transition:opacity .3s;
+}
+.exchange-node.connected{border-color:rgba(16,185,129,.3)}
+.exchange-node.connected::before{background:var(--green);opacity:1}
+.exchange-node.stale{border-color:rgba(245,158,11,.3)}
+.exchange-node.stale::before{background:var(--yellow);opacity:1}
+.exchange-node.disconnected{border-color:rgba(239,68,68,.2);opacity:.6}
+.exchange-node.disconnected::before{background:var(--red);opacity:1}
+.exchange-node-name{
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text);font-weight:bold;margin-bottom:6px;
+}
+.exchange-node-price{font-size:13px;color:#a5f3fc;margin-bottom:4px}
+.exchange-node-age{font-size:10px;color:var(--muted)}
+.exchange-node-status{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-right:4px;vertical-align:middle;
+}
+.exchange-node-status.ok{background:var(--green);box-shadow:0 0 6px rgba(16,185,129,.6)}
+.exchange-node-status.warn{background:var(--yellow);box-shadow:0 0 6px rgba(245,158,11,.6)}
+.exchange-node-status.off{background:var(--muted)}
+
+/* ── hero metric ── */
+.hero-metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
+.hero-metric{
+  background:rgba(15,23,42,.7);border:1px solid var(--border);
+  border-radius:10px;padding:16px;text-align:center;
+  position:relative;transition:all .3s;
+}
+.hero-metric:hover{border-color:var(--border2);box-shadow:0 0 20px rgba(0,212,255,.08)}
+.hero-metric-label{
+  font-size:9px;color:var(--muted);letter-spacing:.12em;
+  text-transform:uppercase;margin-bottom:8px;
+}
+.hero-metric-val{
+  font-size:22px;font-weight:bold;letter-spacing:.04em;
+  font-variant-numeric:tabular-nums;
+}
+.hero-metric-sub{font-size:10px;color:var(--muted);margin-top:4px}
+
+/* ── collapsible nav sections ── */
+.nav-section{overflow:hidden;transition:max-height .3s ease}
+.nav-section.collapsed{max-height:0!important}
+.nav-section-toggle{
+  display:flex;align-items:center;gap:6px;
+  font-size:9px;color:var(--muted);letter-spacing:.14em;
+  padding:14px 17px 5px;text-transform:uppercase;
+  cursor:pointer;transition:color .15s;user-select:none;
+}
+.nav-section-toggle:hover{color:var(--text)}
+.nav-section-arrow{
+  font-size:8px;transition:transform .2s;display:inline-block;
+}
+.nav-section-toggle.collapsed .nav-section-arrow{transform:rotate(-90deg)}
+#sidebar:hover .nav-section-toggle{opacity:1}
+#sidebar .nav-section-toggle{opacity:0;transition:opacity .2s}
+
+/* ── primary nav items ── */
+.nav-item.primary{min-height:44px}
+.nav-item.primary .nav-icon{font-size:17px}
+
+/* ── live data pulse ── */
+@keyframes data-pulse{0%{opacity:1}50%{opacity:.4}100%{opacity:1}}
+.live-dot{
+  display:inline-block;width:5px;height:5px;border-radius:50%;
+  background:var(--green);animation:data-pulse 2s ease-in-out infinite;
+  margin-right:4px;vertical-align:middle;
+}
+
+/* ── command center page header ── */
+.cc-header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:16px;flex-wrap:wrap;gap:12px;
+}
+.cc-title{
+  font-size:14px;letter-spacing:.18em;color:var(--cyan);
+  text-shadow:0 0 20px rgba(0,212,255,.3);
+  text-transform:uppercase;
+}
+.cc-status-bar{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+}
+.cc-status-pill{
+  display:flex;align-items:center;gap:6px;
+  padding:5px 12px;border-radius:6px;font-size:11px;letter-spacing:.06em;
+  background:rgba(15,23,42,.7);border:1px solid var(--border);
+}
+
+/* ── mobile bottom nav ── */
+#mobile-nav{
+  display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;
+  background:rgba(10,14,26,.98);backdrop-filter:blur(20px);
+  border-top:1px solid var(--border);
+  padding:6px 0 env(safe-area-inset-bottom,6px);
+}
+.mobile-nav-row{display:flex;justify-content:space-around;align-items:center}
+.mobile-nav-item{
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:6px 8px;cursor:pointer;color:var(--muted);
+  font-size:9px;letter-spacing:.06em;transition:color .15s;
+  -webkit-tap-highlight-color:transparent;
+}
+.mobile-nav-item.active{color:var(--cyan)}
+.mobile-nav-item .mn-icon{font-size:18px;line-height:1}
+.mobile-nav-more{position:relative}
+.mobile-nav-drawer{
+  display:none;position:fixed;bottom:60px;left:0;right:0;
+  background:rgba(10,14,26,.98);backdrop-filter:blur(20px);
+  border-top:1px solid var(--border);
+  padding:12px;z-index:99;
+  animation:slide-up .2s ease;
+}
+.mobile-nav-drawer.open{display:block}
+@keyframes slide-up{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+.mobile-drawer-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.mobile-drawer-item{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:12px 6px;border-radius:8px;cursor:pointer;
+  color:var(--muted);font-size:10px;letter-spacing:.04em;
+  transition:all .15s;background:rgba(15,23,42,.6);
+  -webkit-tap-highlight-color:transparent;
+}
+.mobile-drawer-item:hover,.mobile-drawer-item:active{
+  background:rgba(0,212,255,.08);color:var(--text);
+}
+.mobile-drawer-item .md-icon{font-size:18px}
+
+/* ── responsive: mobile ── */
+@media(max-width:768px){
+  #sidebar{display:none!important}
+  #mobile-nav{display:block}
+  .page{padding:12px!important}
+  .topbar{padding:0 12px;height:44px}
+  .hero-metrics{grid-template-columns:repeat(2,1fr)}
+  .exchange-health-grid{grid-template-columns:repeat(3,1fr)}
+  .home-grid{grid-template-columns:1fr}
+  .grid-2,.grid-3{grid-template-columns:1fr}
+  .strategy-grid{grid-template-columns:1fr}
+  .hero-metric-val{font-size:18px}
+  .cc-header{flex-direction:column;align-items:flex-start}
+  .cc-status-bar{flex-wrap:wrap}
+  .alerts-layout{grid-template-columns:1fr}
+  #content-area{padding-bottom:70px}
+  .kill-section{max-width:100%}
+  .detail-panel{width:100vw!important}
+  .mode-card-mode{font-size:20px}
+  .conf-score{font-size:32px}
+}
+
+@media(max-width:480px){
+  .exchange-health-grid{grid-template-columns:repeat(2,1fr)}
+  .hero-metrics{grid-template-columns:1fr 1fr}
+  .mobile-drawer-grid{grid-template-columns:repeat(3,1fr)}
+  .rag-grid{grid-template-columns:repeat(2,1fr)}
+}
+
+/* ── tablet improvements ── */
+@media(min-width:769px) and (max-width:1100px){
+  .hero-metrics{grid-template-columns:repeat(3,1fr)}
+  .exchange-health-grid{grid-template-columns:repeat(3,1fr)}
+}
 </style>
 </head>
 <body>
@@ -633,68 +847,83 @@ select option{background:#0d1525}
       <span class="sidebar-logo-text" id="brand-name">CONSENSUS</span>
     </div>
     <nav>
-      <div class="nav-section-label">COMMAND CENTER</div>
-      <div class="nav-item active" id="nav-strategies" onclick="switchPage('strategies')">
+      <!-- PRIMARY — always visible, most-used daily pages -->
+      <div class="nav-section-label" style="opacity:1;padding-top:10px">PRIMARY</div>
+      <div class="nav-item primary active" id="nav-home" onclick="switchPage('home')">
+        <span class="nav-icon">&#9678;</span>
+        <span class="nav-label">Command Center</span>
+      </div>
+      <div class="nav-item primary" id="nav-strategies" onclick="switchPage('strategies')">
         <span class="nav-icon">&#9638;</span>
-        <span class="nav-label">Strategy Hub</span>
+        <span class="nav-label">Strategies</span>
       </div>
-      <div class="nav-item" id="nav-home" onclick="switchPage('home')">
-        <span class="nav-icon">&#8962;</span>
-        <span class="nav-label">Dashboard</span>
-      </div>
-      <div class="nav-item" id="nav-live" onclick="switchPage('live')">
+      <div class="nav-item primary" id="nav-live" onclick="switchPage('live')">
         <span class="nav-icon">&#9685;</span>
         <span class="nav-label">Live Feed</span>
       </div>
-      <div class="nav-section-label">ANALYTICS</div>
-      <div class="nav-item" id="nav-pnl" onclick="switchPage('pnl')">
+      <div class="nav-item primary" id="nav-pnl" onclick="switchPage('pnl')">
         <span class="nav-icon">&#36;</span>
         <span class="nav-label">P&amp;L</span>
       </div>
-      <div class="nav-item" id="nav-positions" onclick="switchPage('positions')">
-        <span class="nav-icon">&#8699;</span>
-        <span class="nav-label">Positions</span>
+
+      <!-- ANALYTICS — collapsible, less frequent -->
+      <div class="nav-section-toggle" id="nav-toggle-analytics" onclick="toggleNavSection('analytics')">
+        <span class="nav-section-arrow">&#9660;</span>
+        <span class="nav-label" style="opacity:1;transform:none">ANALYTICS</span>
       </div>
-      <div class="nav-item" id="nav-funding" onclick="switchPage('funding')">
-        <span class="nav-icon">&#9654;</span>
-        <span class="nav-label">Funding</span>
+      <div class="nav-section" id="nav-section-analytics">
+        <div class="nav-item" id="nav-positions" onclick="switchPage('positions')">
+          <span class="nav-icon">&#8699;</span>
+          <span class="nav-label">Positions</span>
+        </div>
+        <div class="nav-item" id="nav-funding" onclick="switchPage('funding')">
+          <span class="nav-icon">&#9654;</span>
+          <span class="nav-label">Funding</span>
+        </div>
+        <div class="nav-item" id="nav-orders" onclick="switchPage('orders')">
+          <span class="nav-icon">&#9776;</span>
+          <span class="nav-label">Orders</span>
+        </div>
+        <div class="nav-item" id="nav-timeline" onclick="switchPage('timeline')">
+          <span class="nav-icon">&#9679;</span>
+          <span class="nav-label">Timeline</span>
+        </div>
       </div>
-      <div class="nav-item" id="nav-orders" onclick="switchPage('orders')">
-        <span class="nav-icon">&#9776;</span>
-        <span class="nav-label">Orders</span>
+
+      <!-- SYSTEM — collapsible -->
+      <div class="nav-section-toggle" id="nav-toggle-system" onclick="toggleNavSection('system')">
+        <span class="nav-section-arrow">&#9660;</span>
+        <span class="nav-label" style="opacity:1;transform:none">SYSTEM</span>
       </div>
-      <div class="nav-item" id="nav-timeline" onclick="switchPage('timeline')">
-        <span class="nav-icon">&#9679;</span>
-        <span class="nav-label">Timeline</span>
-      </div>
-      <div class="nav-section-label">SYSTEM</div>
-      <div class="nav-item" id="nav-risk" onclick="switchPage('risk')">
-        <span class="nav-icon">&#9888;</span>
-        <span class="nav-label">Risk</span>
-      </div>
-      <div class="nav-item" id="nav-connections" onclick="switchPage('connections')">
-        <span class="nav-icon">&#9670;</span>
-        <span class="nav-label">Connections</span>
-      </div>
-      <div class="nav-item" id="nav-kill" onclick="switchPage('kill')">
-        <span class="nav-icon">&#9889;</span>
-        <span class="nav-label">Kill Switch</span>
-      </div>
-      <div class="nav-item" id="nav-alerts" onclick="switchPage('alerts')">
-        <span class="nav-icon">&#9993;</span>
-        <span class="nav-label">Alerts</span>
-      </div>
-      <div class="nav-item" id="nav-audit" onclick="switchPage('audit')">
-        <span class="nav-icon">&#9998;</span>
-        <span class="nav-label">Audit</span>
-      </div>
-      <div class="nav-item admin-only" id="nav-config" onclick="switchPage('config')">
-        <span class="nav-icon">&#9881;</span>
-        <span class="nav-label">Config</span>
-      </div>
-      <div class="nav-item admin-only" id="nav-apikeys" onclick="switchPage('apikeys')">
-        <span class="nav-icon">&#128273;</span>
-        <span class="nav-label">API Keys</span>
+      <div class="nav-section" id="nav-section-system">
+        <div class="nav-item" id="nav-risk" onclick="switchPage('risk')">
+          <span class="nav-icon">&#9888;</span>
+          <span class="nav-label">Risk</span>
+        </div>
+        <div class="nav-item" id="nav-kill" onclick="switchPage('kill')">
+          <span class="nav-icon">&#9889;</span>
+          <span class="nav-label">Kill Switch</span>
+        </div>
+        <div class="nav-item" id="nav-connections" onclick="switchPage('connections')">
+          <span class="nav-icon">&#9670;</span>
+          <span class="nav-label">Connections</span>
+        </div>
+        <div class="nav-item" id="nav-alerts" onclick="switchPage('alerts')">
+          <span class="nav-icon">&#9993;</span>
+          <span class="nav-label">Alerts</span>
+        </div>
+        <div class="nav-item" id="nav-audit" onclick="switchPage('audit')">
+          <span class="nav-icon">&#9998;</span>
+          <span class="nav-label">Audit</span>
+        </div>
+        <div class="nav-item admin-only" id="nav-config" onclick="switchPage('config')">
+          <span class="nav-icon">&#9881;</span>
+          <span class="nav-label">Config</span>
+        </div>
+        <div class="nav-item admin-only" id="nav-apikeys" onclick="switchPage('apikeys')">
+          <span class="nav-icon">&#128273;</span>
+          <span class="nav-label">API Keys</span>
+        </div>
       </div>
     </nav>
   </div>
@@ -724,7 +953,7 @@ select option{background:#0d1525}
     <div id="content-area">
 
       <!-- ─── STRATEGY HUB ─── -->
-      <div class="page active" id="page-strategies">
+      <div class="page" id="page-strategies">
         <div class="strategy-hub-header">
           <div class="strategy-hub-title">STRATEGY COMMAND CENTER</div>
           <div class="capital-bar" id="capital-bar">
@@ -751,9 +980,105 @@ select option{background:#0d1525}
         </div>
       </div>
 
-      <!-- ─── HOME / DASHBOARD ─── -->
-      <div class="page" id="page-home">
+      <!-- ─── HOME / COMMAND CENTER ─── -->
+      <div class="page active" id="page-home">
+
+        <!-- Command Center Header -->
+        <div class="cc-header">
+          <div class="cc-title"><span class="live-dot"></span> Command Center</div>
+          <div class="cc-status-bar">
+            <div class="cc-status-pill" id="cc-mode-pill" style="border-color:rgba(16,185,129,.3)">
+              <span id="cc-mode-dot" style="width:7px;height:7px;border-radius:50%;background:var(--green)"></span>
+              <span id="cc-mode-text" style="color:var(--green);font-weight:bold">RUNNING</span>
+            </div>
+            <div class="cc-status-pill" id="cc-trading-pill" style="border-color:rgba(245,158,11,.3)">
+              <span id="cc-trading-text" style="color:var(--yellow)">PAPER</span>
+            </div>
+            <div class="cc-status-pill" style="gap:4px">
+              <span style="font-size:10px;color:var(--muted)">CONF</span>
+              <span id="cc-conf-text" style="font-weight:bold;color:var(--muted)">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hero Metrics -->
+        <div class="hero-metrics">
+          <div class="hero-metric card-hud">
+            <div class="hero-metric-label">Total P&amp;L</div>
+            <div class="hero-metric-val" id="home-pnl-total" style="color:var(--green)">—</div>
+            <div class="hero-metric-sub" id="home-pnl-fills">0 fills</div>
+          </div>
+          <div class="hero-metric card-hud">
+            <div class="hero-metric-label">Win Rate</div>
+            <div class="hero-metric-val" id="home-win-rate">—</div>
+          </div>
+          <div class="hero-metric card-hud">
+            <div class="hero-metric-label">Sharpe</div>
+            <div class="hero-metric-val" id="home-sharpe">—</div>
+          </div>
+          <div class="hero-metric card-hud">
+            <div class="hero-metric-label">Drawdown</div>
+            <div class="hero-metric-val" id="home-drawdown-val" style="color:var(--green)">—</div>
+          </div>
+          <div class="hero-metric card-hud">
+            <div class="hero-metric-label">Avg Slippage</div>
+            <div class="hero-metric-val" id="home-slippage">—</div>
+            <div class="hero-metric-sub">bps</div>
+          </div>
+        </div>
+
+        <!-- Exchange Feed Health -->
+        <div class="card card-hud" style="margin-bottom:16px">
+          <div class="card-title"><span class="live-dot"></span> Exchange Feed Status</div>
+          <div class="exchange-health-grid" id="exchange-health-grid">
+            <div class="exchange-node disconnected" id="exnode-binance">
+              <div class="exchange-node-name"><span class="exchange-node-status off"></span>Binance</div>
+              <div class="exchange-node-price" id="exnode-binance-price">—</div>
+              <div class="exchange-node-age" id="exnode-binance-age">waiting</div>
+            </div>
+            <div class="exchange-node disconnected" id="exnode-okx">
+              <div class="exchange-node-name"><span class="exchange-node-status off"></span>OKX</div>
+              <div class="exchange-node-price" id="exnode-okx-price">—</div>
+              <div class="exchange-node-age" id="exnode-okx-age">waiting</div>
+            </div>
+            <div class="exchange-node disconnected" id="exnode-bybit">
+              <div class="exchange-node-name"><span class="exchange-node-status off"></span>Bybit</div>
+              <div class="exchange-node-price" id="exnode-bybit-price">—</div>
+              <div class="exchange-node-age" id="exnode-bybit-age">waiting</div>
+            </div>
+            <div class="exchange-node disconnected" id="exnode-deribit">
+              <div class="exchange-node-name"><span class="exchange-node-status off"></span>Deribit</div>
+              <div class="exchange-node-price" id="exnode-deribit-price">—</div>
+              <div class="exchange-node-age" id="exnode-deribit-age">waiting</div>
+            </div>
+            <div class="exchange-node disconnected" id="exnode-htx">
+              <div class="exchange-node-name"><span class="exchange-node-status off"></span>HTX</div>
+              <div class="exchange-node-price" id="exnode-htx-price">—</div>
+              <div class="exchange-node-age" id="exnode-htx-age">waiting</div>
+            </div>
+            <div class="exchange-node disconnected" id="exnode-gate">
+              <div class="exchange-node-name"><span class="exchange-node-status off"></span>Gate</div>
+              <div class="exchange-node-price" id="exnode-gate-price">—</div>
+              <div class="exchange-node-age" id="exnode-gate-age">waiting</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Risk Cockpit -->
+        <div class="card card-hud" style="margin-bottom:16px">
+          <div class="card-title">Risk Cockpit</div>
+          <div class="rag-grid">
+            <div class="rag green" id="home-rag-drawdown"><div class="rag-label">DRAWDOWN</div><div class="rag-val" id="home-rag-drawdown-val">—</div></div>
+            <div class="rag green" id="home-rag-errrate"><div class="rag-label">ERR RATE 5m</div><div class="rag-val" id="home-errrate-val">—</div></div>
+            <div class="rag green" id="home-rag-adl"><div class="rag-label">ADL RISK</div><div class="rag-val" id="home-adl-val">—</div></div>
+            <div class="rag green" id="home-rag-liq"><div class="rag-label">LIQ CLUSTERS</div><div class="rag-val" id="home-liq-val">—</div></div>
+            <div class="rag green" id="home-rag-delev"><div class="rag-label">DELEV EVENTS</div><div class="rag-val" id="home-delev-val">—</div></div>
+            <div class="rag green" id="home-rag-bl"><div class="rag-label">BLACKLISTED</div><div class="rag-val" id="home-bl-val">0</div></div>
+          </div>
+        </div>
+
         <div class="home-grid">
+          <!-- Mode + Trading Controls -->
           <div id="home-mode-card" class="mode-card" style="color:var(--green);border-color:var(--green)">
             <div class="mode-card-mode" id="home-mode-text">RUNNING</div>
             <div class="mode-card-reason" id="home-mode-reason"></div>
@@ -817,27 +1142,6 @@ select option{background:#0d1525}
           </div>
 
           <div class="card">
-            <div class="card-title">P&amp;L Summary</div>
-            <div class="stat-row"><span class="stat-label">TOTAL PnL</span><span class="stat-val" id="home-pnl-total">—</span></div>
-            <div class="stat-row"><span class="stat-label">FILLS</span><span class="stat-val" id="home-pnl-fills">—</span></div>
-            <div class="stat-row"><span class="stat-label">WIN RATE</span><span class="stat-val" id="home-win-rate">—</span></div>
-            <div class="stat-row"><span class="stat-label">SHARPE</span><span class="stat-val" id="home-sharpe">—</span></div>
-            <div class="stat-row"><span class="stat-label">AVG SLIP</span><span class="stat-val" id="home-slippage">—</span></div>
-          </div>
-
-          <div class="card">
-            <div class="card-title">Risk Cockpit</div>
-            <div class="rag-grid">
-              <div class="rag green" id="home-rag-drawdown"><div class="rag-label">DRAWDOWN</div><div class="rag-val" id="home-drawdown-val">—</div></div>
-              <div class="rag green" id="home-rag-errrate"><div class="rag-label">ERR RATE 5m</div><div class="rag-val" id="home-errrate-val">—</div></div>
-              <div class="rag green" id="home-rag-adl"><div class="rag-label">ADL RISK</div><div class="rag-val" id="home-adl-val">—</div></div>
-              <div class="rag green" id="home-rag-liq"><div class="rag-label">LIQ CLUSTERS</div><div class="rag-val" id="home-liq-val">—</div></div>
-              <div class="rag green" id="home-rag-delev"><div class="rag-label">DELEV EVENTS</div><div class="rag-val" id="home-delev-val">—</div></div>
-              <div class="rag green" id="home-rag-bl"><div class="rag-label">BLACKLISTED</div><div class="rag-val" id="home-bl-val">0</div></div>
-            </div>
-          </div>
-
-          <div class="card">
             <div class="card-title">Paper Confidence</div>
             <div class="conf-score" id="home-conf-score">—</div>
             <div class="conf-bar-wrap"><div class="conf-bar" id="home-conf-bar" style="width:0%;background:var(--muted)"></div></div>
@@ -849,19 +1153,21 @@ select option{background:#0d1525}
           </div>
         </div>
 
-        <div class="card" style="margin-top:0">
+        <!-- Live Prices Table -->
+        <div class="card card-hud" style="margin-top:0">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-            Live Prices — Top Tokens by Market Cap
+            <span><span class="live-dot"></span> Live Prices — All Venues</span>
             <span id="price-feed-updated" style="font-size:10px;color:var(--muted)"></span>
           </div>
           <div style="overflow-x:auto">
             <table id="price-feed-table">
-              <thead><tr><th>Token</th><th>Binance</th><th>Age</th><th>OKX</th><th>Age</th><th>Bybit</th><th>Age</th><th>Deribit</th><th>Age</th></tr></thead>
-              <tbody id="price-feed-tbody"><tr><td colspan="9" class="empty-state">Waiting for market data...</td></tr></tbody>
+              <thead><tr><th>Token</th><th>Binance</th><th>Age</th><th>OKX</th><th>Age</th><th>Bybit</th><th>Age</th><th>Deribit</th><th>Age</th><th>HTX</th><th>Age</th><th>Gate</th><th>Age</th></tr></thead>
+              <tbody id="price-feed-tbody"><tr><td colspan="13" class="empty-state">Waiting for market data...</td></tr></tbody>
             </table>
           </div>
         </div>
 
+        <!-- Recent Activity -->
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             Recent Activity
@@ -1205,6 +1511,49 @@ select option{background:#0d1525}
 
     </div><!-- #content-area -->
   </div><!-- #main -->
+
+  <!-- Mobile Bottom Navigation -->
+  <div id="mobile-nav">
+    <div class="mobile-nav-row">
+      <div class="mobile-nav-item active" id="mnav-home" onclick="mobileNav('home')">
+        <span class="mn-icon">&#9678;</span>
+        <span>Home</span>
+      </div>
+      <div class="mobile-nav-item" id="mnav-strategies" onclick="mobileNav('strategies')">
+        <span class="mn-icon">&#9638;</span>
+        <span>Strategies</span>
+      </div>
+      <div class="mobile-nav-item" id="mnav-live" onclick="mobileNav('live')">
+        <span class="mn-icon">&#9685;</span>
+        <span>Live</span>
+      </div>
+      <div class="mobile-nav-item" id="mnav-pnl" onclick="mobileNav('pnl')">
+        <span class="mn-icon">&#36;</span>
+        <span>P&amp;L</span>
+      </div>
+      <div class="mobile-nav-item mobile-nav-more" id="mnav-more" onclick="toggleMobileDrawer()">
+        <span class="mn-icon">&#8943;</span>
+        <span>More</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile More Drawer -->
+  <div class="mobile-nav-drawer" id="mobile-drawer">
+    <div class="mobile-drawer-grid">
+      <div class="mobile-drawer-item" onclick="mobileNav('positions')"><span class="md-icon">&#8699;</span>Positions</div>
+      <div class="mobile-drawer-item" onclick="mobileNav('funding')"><span class="md-icon">&#9654;</span>Funding</div>
+      <div class="mobile-drawer-item" onclick="mobileNav('orders')"><span class="md-icon">&#9776;</span>Orders</div>
+      <div class="mobile-drawer-item" onclick="mobileNav('timeline')"><span class="md-icon">&#9679;</span>Timeline</div>
+      <div class="mobile-drawer-item" onclick="mobileNav('risk')"><span class="md-icon">&#9888;</span>Risk</div>
+      <div class="mobile-drawer-item" onclick="mobileNav('kill')"><span class="md-icon">&#9889;</span>Kill Switch</div>
+      <div class="mobile-drawer-item" onclick="mobileNav('connections')"><span class="md-icon">&#9670;</span>Connections</div>
+      <div class="mobile-drawer-item" onclick="mobileNav('alerts')"><span class="md-icon">&#9993;</span>Alerts</div>
+      <div class="mobile-drawer-item" onclick="mobileNav('audit')"><span class="md-icon">&#9998;</span>Audit</div>
+      <div class="mobile-drawer-item admin-only" onclick="mobileNav('config')"><span class="md-icon">&#9881;</span>Config</div>
+      <div class="mobile-drawer-item admin-only" onclick="mobileNav('apikeys')"><span class="md-icon">&#128273;</span>API Keys</div>
+    </div>
+  </div>
 </div><!-- #app -->
 
 <!-- ─── STRATEGY DETAIL PANEL ─── -->
@@ -1290,7 +1639,7 @@ const S = {
   token: '',
   role: 'viewer',
   tenantName: 'CONSENSUS',
-  activePage: 'strategies',
+  activePage: 'home',
   data: {},
   anomalies: [],
   alertLog: [],
@@ -1337,7 +1686,7 @@ async function boot() {
   startClientPriceFetcher();
   loadConnections();
   loadAlerts();
-  switchPage('strategies');
+  switchPage('home');
   setInterval(() => {
     if (S.activePage === 'home') loadHome();
     if (S.activePage === 'timeline') loadTimeline();
@@ -1875,6 +2224,11 @@ function updateTradingModeUI() {
   const col = modeColors[currentTradingMode] || 'var(--muted)';
   const label = document.getElementById('trading-mode-label');
   if (label) { label.textContent = currentTradingMode; label.style.color = col; }
+  // CC header trading pill
+  const ccTrading = document.getElementById('cc-trading-text');
+  if (ccTrading) { ccTrading.textContent = currentTradingMode; ccTrading.style.color = col; }
+  const ccTradingPill = document.getElementById('cc-trading-pill');
+  if (ccTradingPill) { ccTradingPill.style.borderColor = col.replace('var(','rgba(').replace(')',',.3)'); }
   ['PAPER','SHADOW','LIVE'].forEach(m => {
     const btn = document.getElementById('tm-btn-' + m.toLowerCase());
     if (btn) {
@@ -2081,7 +2435,16 @@ async function loadHome() {
       const card = document.getElementById('home-mode-card');
       if (card) { card.style.color = col; card.style.borderColor = col; }
       setVal('home-mode-text', mode); setVal('home-mode-reason', s.reason || '');
-      const dd = s.drawdown_pct || 0; setRAG('home-rag-drawdown', dd, 5, 15); setVal('home-drawdown-val', dd.toFixed(1) + '%');
+      // Command center header pills
+      const ccModeDot = document.getElementById('cc-mode-dot');
+      const ccModeText = document.getElementById('cc-mode-text');
+      const ccModePill = document.getElementById('cc-mode-pill');
+      if (ccModeDot) ccModeDot.style.background = col;
+      if (ccModeText) { ccModeText.textContent = mode; ccModeText.style.color = col; }
+      if (ccModePill) ccModePill.style.borderColor = col.replace('var(','rgba(').replace(')',',.3)');
+      const dd = s.drawdown_pct || 0; setRAG('home-rag-drawdown', dd, 5, 15); setVal('home-rag-drawdown-val', dd.toFixed(1) + '%');
+      const ddEl = document.getElementById('home-drawdown-val');
+      if (ddEl) { ddEl.textContent = dd.toFixed(1) + '%'; ddEl.style.color = dd >= 15 ? 'var(--red)' : dd >= 5 ? 'var(--yellow)' : 'var(--green)'; }
       const er = s.error_rate_5m_pct || 0; setRAG('home-rag-errrate', er, 10, 25); setVal('home-errrate-val', er.toFixed(1) + '%');
       const adl = s.adl_risk_pct || 0; setRAG('home-rag-adl', adl, 40, 70); setVal('home-adl-val', adl.toFixed(1) + '%');
       const liq = s.liq_cluster_risk || 0; setRAG('home-rag-liq', liq, 2, 5); setVal('home-liq-val', String(liq));
@@ -2098,15 +2461,16 @@ async function loadHome() {
       const el = document.getElementById('home-pnl-total');
       if (el) { el.textContent = fmtUSD(total); el.style.color = col; }
       let fills = 0; rows.forEach(r => { fills += parseInt(r.fill_count) || 0; });
-      setVal('home-pnl-fills', fills.toLocaleString());
+      setVal('home-pnl-fills', fills.toLocaleString() + ' fills');
     }
     if (kpiR.ok) {
       const kpi = await kpiR.json();
-      setVal('home-win-rate', (parseFloat(kpi.win_rate_pct)||0).toFixed(1) + '%');
+      const wr = (parseFloat(kpi.win_rate_pct)||0).toFixed(1) + '%';
+      setVal('home-win-rate', wr);
       const sh = parseFloat(kpi.sharpe_proxy) || 0;
       const shEl = document.getElementById('home-sharpe');
       if (shEl) { shEl.textContent = sh.toFixed(2); shEl.style.color = sh >= 1 ? 'var(--green)' : sh >= 0 ? 'var(--yellow)' : 'var(--red)'; }
-      setVal('home-slippage', (parseFloat(kpi.avg_slippage_bps)||0).toFixed(2) + ' bps');
+      setVal('home-slippage', (parseFloat(kpi.avg_slippage_bps)||0).toFixed(2));
     }
   } catch(e) { console.warn('loadHome/pnl:', e); }
   loadTradingMode();
@@ -2122,6 +2486,9 @@ async function loadHome() {
       setVal('chk-paper', '\u2713');
       const chkS = document.getElementById('chk-shadow'); if (chkS) { chkS.textContent = score >= 50 ? '\u2713' : '\u25cb'; chkS.style.color = score >= 50 ? 'var(--green)' : 'var(--muted)'; }
       const chkL = document.getElementById('chk-live'); if (chkL) { chkL.textContent = score >= 80 ? '\u2713' : '\u25cb'; chkL.style.color = score >= 80 ? 'var(--green)' : 'var(--muted)'; }
+      // Update CC header confidence pill
+      const ccConf = document.getElementById('cc-conf-text');
+      if (ccConf) { ccConf.textContent = score.toFixed(0); ccConf.style.color = col; }
       updateTradingModeUI();
     }
   } catch(e) { console.warn('loadHome/conf:', e); }
@@ -2180,8 +2547,8 @@ async function loadConfidence() {
 // ═══════════════════════════════════════════════════════
 // Price feed
 // ═══════════════════════════════════════════════════════
-const PRICE_FEED_TOKENS = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP'];
-const PRICE_FEED_VENUES = ['binance', 'okx', 'bybit', 'deribit'];
+const PRICE_FEED_TOKENS = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];
+const PRICE_FEED_VENUES = ['binance', 'okx', 'bybit', 'deribit', 'htx', 'gate'];
 
 function renderPriceFeed() {
   const tbody = document.getElementById('price-feed-tbody'); if (!tbody) return;
@@ -2206,16 +2573,61 @@ function renderPriceFeed() {
   }).join('');
   const ts = document.getElementById('price-feed-updated');
   if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+  // Update exchange health nodes
+  renderExchangeHealth();
+}
+
+function renderExchangeHealth() {
+  const now = Date.now();
+  PRICE_FEED_VENUES.forEach(venue => {
+    const node = document.getElementById('exnode-' + venue);
+    const priceEl = document.getElementById('exnode-' + venue + '-price');
+    const ageEl = document.getElementById('exnode-' + venue + '-age');
+    if (!node) return;
+    // Find the latest BTC price for this venue as the representative
+    let best = null;
+    for (const [k, v] of Object.entries(S.priceLatest)) {
+      const [kv, sym] = k.split(':');
+      if (kv === venue && sym && sym.startsWith('BTC')) {
+        if (!best || v.ts_ms > best.ts_ms) best = v;
+      }
+    }
+    const statusDot = node.querySelector('.exchange-node-status');
+    if (!best) {
+      node.className = 'exchange-node disconnected';
+      if (priceEl) priceEl.textContent = '—';
+      if (ageEl) ageEl.textContent = 'no data';
+      if (statusDot) statusDot.className = 'exchange-node-status off';
+      return;
+    }
+    const age = now - best.ts_ms;
+    if (priceEl) priceEl.textContent = fmtPrice(best.price);
+    if (age < 10000) {
+      node.className = 'exchange-node connected';
+      if (statusDot) statusDot.className = 'exchange-node-status ok';
+      if (ageEl) ageEl.innerHTML = '<span style="color:var(--green)">live</span>';
+    } else if (age < 60000) {
+      node.className = 'exchange-node stale';
+      if (statusDot) statusDot.className = 'exchange-node-status warn';
+      if (ageEl) ageEl.innerHTML = '<span style="color:var(--yellow)">' + Math.floor(age/1000) + 's ago</span>';
+    } else {
+      node.className = 'exchange-node disconnected';
+      if (statusDot) statusDot.className = 'exchange-node-status off';
+      if (ageEl) ageEl.innerHTML = '<span style="color:var(--red)">' + Math.floor(age/60000) + 'm ago</span>';
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════
 // Client-side price fetcher
 // ═══════════════════════════════════════════════════════
 const CLIENT_PRICE_SYMBOLS = {
-  binance: { BTCUSDT:'BTC-PERP', ETHUSDT:'ETH-PERP', BNBUSDT:'BNB-PERP', SOLUSDT:'SOL-PERP', XRPUSDT:'XRP-PERP' },
-  bybit:   { BTCUSDT:'BTC-PERP', ETHUSDT:'ETH-PERP', BNBUSDT:'BNB-PERP', SOLUSDT:'SOL-PERP', XRPUSDT:'XRP-PERP' },
-  okx:     { 'BTC-USDT-SWAP':'BTC-PERP', 'ETH-USDT-SWAP':'ETH-PERP', 'SOL-USDT-SWAP':'SOL-PERP', 'XRP-USDT-SWAP':'XRP-PERP' },
+  binance: { BTCUSDT:'BTC-PERP', ETHUSDT:'ETH-PERP', SOLUSDT:'SOL-PERP', XRPUSDT:'XRP-PERP', DOGEUSDT:'DOGE-PERP' },
+  bybit:   { BTCUSDT:'BTC-PERP', ETHUSDT:'ETH-PERP', SOLUSDT:'SOL-PERP', XRPUSDT:'XRP-PERP', DOGEUSDT:'DOGE-PERP' },
+  okx:     { 'BTC-USDT-SWAP':'BTC-PERP', 'ETH-USDT-SWAP':'ETH-PERP', 'SOL-USDT-SWAP':'SOL-PERP', 'XRP-USDT-SWAP':'XRP-PERP', 'DOGE-USDT-SWAP':'DOGE-PERP' },
   deribit: { 'BTC-PERPETUAL':'BTC-PERP', 'ETH-PERPETUAL':'ETH-PERP' },
+  htx:     { 'BTC-USDT':'BTC-PERP', 'ETH-USDT':'ETH-PERP', 'SOL-USDT':'SOL-PERP', 'XRP-USDT':'XRP-PERP', 'DOGE-USDT':'DOGE-PERP' },
+  gate:    { 'BTC_USDT':'BTC-PERP', 'ETH_USDT':'ETH-PERP', 'SOL_USDT':'SOL-PERP', 'XRP_USDT':'XRP-PERP', 'DOGE_USDT':'DOGE-PERP' },
 };
 let _clientPriceTimer = null;
 
@@ -2226,7 +2638,7 @@ function startClientPriceFetcher() {
 }
 
 async function _fetchClientPrices() {
-  await Promise.allSettled([_fetchBinanceClient(), _fetchBybitClient(), _fetchOKXClient(), _fetchDeribitClient()]);
+  await Promise.allSettled([_fetchBinanceClient(), _fetchBybitClient(), _fetchOKXClient(), _fetchDeribitClient(), _fetchHTXClient(), _fetchGateClient()]);
   if (S.activePage === 'home') renderPriceFeed();
 }
 
@@ -2268,6 +2680,111 @@ async function _fetchDeribitClient() {
     }
   } catch(e) { console.debug('client-prices: deribit:', e.message); }
 }
+
+// ═══════════════════════════════════════════════════════
+// HTX + Gate client price fetchers
+// ═══════════════════════════════════════════════════════
+async function _fetchHTXClient() {
+  try {
+    const syms = CLIENT_PRICE_SYMBOLS.htx;
+    for (const [inst, can] of Object.entries(syms)) {
+      const contract = inst.toLowerCase().replace('-', '_');
+      const r = await fetch('https://api.hbdm.com/linear-swap-ex/market/detail/merged?contract_code=' + encodeURIComponent(inst));
+      if (!r.ok) continue;
+      const data = await r.json();
+      const tick = data.tick;
+      if (tick && tick.bid && tick.ask) {
+        _updatePrice('htx', can, tick.bid[0], tick.ask[0]);
+      }
+    }
+  } catch(e) { console.debug('client-prices: htx:', e.message); }
+}
+
+async function _fetchGateClient() {
+  try {
+    const r = await fetch('https://api.gateio.ws/api/v4/futures/usdt/tickers');
+    if (!r.ok) return;
+    const data = await r.json();
+    const syms = CLIENT_PRICE_SYMBOLS.gate;
+    for (const t of data) {
+      const can = syms[t.contract];
+      if (!can) continue;
+      const last = parseFloat(t.last);
+      if (last > 0) {
+        // Gate tickers don't always have bid/ask, use last as approximation
+        const bid = parseFloat(t.highest_bid) || last * 0.9999;
+        const ask = parseFloat(t.lowest_ask) || last * 1.0001;
+        _updatePrice('gate', can, bid, ask);
+      }
+    }
+  } catch(e) { console.debug('client-prices: gate:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════
+// Collapsible nav sections + mobile nav
+// ═══════════════════════════════════════════════════════
+const _navSectionState = { analytics: true, system: true }; // true = expanded
+
+function toggleNavSection(section) {
+  _navSectionState[section] = !_navSectionState[section];
+  const el = document.getElementById('nav-section-' + section);
+  const toggle = document.getElementById('nav-toggle-' + section);
+  if (el) {
+    if (_navSectionState[section]) {
+      el.classList.remove('collapsed');
+      el.style.maxHeight = el.scrollHeight + 'px';
+    } else {
+      el.style.maxHeight = '0';
+      el.classList.add('collapsed');
+    }
+  }
+  if (toggle) toggle.classList.toggle('collapsed', !_navSectionState[section]);
+}
+
+// Initialize nav section heights.
+function initNavSections() {
+  ['analytics', 'system'].forEach(section => {
+    const el = document.getElementById('nav-section-' + section);
+    if (el) el.style.maxHeight = el.scrollHeight + 'px';
+  });
+}
+
+function mobileNav(page) {
+  closeMobileDrawer();
+  switchPage(page);
+  // Update mobile nav active states
+  const mobileItems = ['home','strategies','live','pnl'];
+  mobileItems.forEach(p => {
+    const el = document.getElementById('mnav-' + p);
+    if (el) el.classList.toggle('active', p === page);
+  });
+  // If page is not in primary mobile items, highlight "More"
+  if (!mobileItems.includes(page)) {
+    mobileItems.forEach(p => {
+      const el = document.getElementById('mnav-' + p);
+      if (el) el.classList.remove('active');
+    });
+  }
+}
+
+function toggleMobileDrawer() {
+  const drawer = document.getElementById('mobile-drawer');
+  if (drawer) drawer.classList.toggle('open');
+}
+
+function closeMobileDrawer() {
+  const drawer = document.getElementById('mobile-drawer');
+  if (drawer) drawer.classList.remove('open');
+}
+
+// Close drawer when clicking outside
+document.addEventListener('click', (e) => {
+  const drawer = document.getElementById('mobile-drawer');
+  const moreBtn = document.getElementById('mnav-more');
+  if (drawer && drawer.classList.contains('open') && !drawer.contains(e.target) && !moreBtn.contains(e.target)) {
+    drawer.classList.remove('open');
+  }
+});
 
 // ═══════════════════════════════════════════════════════
 // Audit / API Keys / Branding
@@ -2731,6 +3248,9 @@ function setRAG(elId, val, warnThresh, redThresh) {
     sessionStorage.removeItem('token');
   }
 })();
+
+// Initialize collapsible nav sections after DOM ready.
+document.addEventListener('DOMContentLoaded', initNavSections);
 </script>
 </body>
 </html>
