@@ -40,6 +40,10 @@ type Engine struct {
 	// runtimeStages holds dynamic stage overrides set via the dashboard.
 	// These take precedence over YAML-configured stages in SymbolOverrides.
 	runtimeStages map[string]FundingStage
+	// ExitSignalC is a non-blocking signal channel. UpdateQuote sends on it
+	// when a funding rate sign change is detected, so the main loop can
+	// immediately evaluate exits instead of waiting for the next eval tick.
+	ExitSignalC chan struct{}
 }
 
 func NewEngine(p *Policy) *Engine {
@@ -48,14 +52,15 @@ func NewEngine(p *Policy) *Engine {
 		state[sym] = make(map[string]*venueData)
 	}
 	return &Engine{
-		policy:     p,
-		state:      state,
-		cooldown:   make(map[string]int64),
-		Emitted:    make(map[string]int),
-		Rejected:   make(map[string]int),
-		forecaster: NewRegimeForecaster(0.15),
-		scheduler:  NewFundingScheduler(),
-		volTracker: NewVolTracker(500),
+		policy:      p,
+		state:       state,
+		cooldown:    make(map[string]int64),
+		Emitted:     make(map[string]int),
+		Rejected:    make(map[string]int),
+		forecaster:  NewRegimeForecaster(0.15),
+		scheduler:   NewFundingScheduler(),
+		volTracker:  NewVolTracker(500),
+		ExitSignalC: make(chan struct{}, 1),
 	}
 }
 
@@ -76,9 +81,17 @@ func (e *Engine) UpdateQuote(q consensus.Quote) {
 		e.state[sym][ven] = d
 	}
 	if q.FundingRate != 0 {
+		oldRate := d.fundingRate
 		d.fundingRate = q.FundingRate
 		// Update the regime forecaster whenever a new funding rate arrives.
 		e.forecaster.Update(ven, sym, q.FundingRate, q.TsMs)
+		// Detect funding rate sign change → signal immediate exit evaluation.
+		if oldRate != 0 && signFlipped(oldRate, q.FundingRate) {
+			select {
+			case e.ExitSignalC <- struct{}{}:
+			default: // already signalled, don't block
+			}
+		}
 	}
 	if q.Mark > 0 {
 		d.markPrice = q.Mark
@@ -164,10 +177,12 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 
 			// Annualised gross yield (%) from 8h funding: rate × 3 × 365 × 100
 			annualGrossPct := d.fundingRate * 3 * 365 * 100
-			// Cost: 2 entry legs × taker fee (spot buy + perp short).
-			// Expressed as annual % (conservative: assume hold 30 days = 90 periods).
-			entryFeePct := d.feeBpsTaker * 2 / 10000 * 100
-			annualNetPct := annualGrossPct - entryFeePct
+			// Round-trip cost: 4 legs of taker fee (entry: spot buy + perp short,
+			// exit: spot sell + perp buy) plus slippage on all 4 legs.
+			// Deducted as a one-off % cost from the annualised yield.
+			roundTripFeePct := d.feeBpsTaker * 4 / 10000 * 100
+			roundTripSlipPct := e.policy.maxSlippage(sym) * 4 / 10000 * 100
+			annualNetPct := annualGrossPct - roundTripFeePct - roundTripSlipPct
 
 			threshold := e.minYield(sym, annualNetPct)
 			if annualNetPct < threshold {
@@ -234,8 +249,9 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 
 			// Annualised gross yield from negative funding: |rate| × 3 × 365 × 100
 			annualGrossPct := -d.fundingRate * 3 * 365 * 100
-			entryFeePct := d.feeBpsTaker * 2 / 10000 * 100
-			annualNetPct := annualGrossPct - entryFeePct
+			roundTripFeePct := d.feeBpsTaker * 4 / 10000 * 100
+			roundTripSlipPct := e.policy.maxSlippage(sym) * 4 / 10000 * 100
+			annualNetPct := annualGrossPct - roundTripFeePct - roundTripSlipPct
 
 			threshold := e.minYield(sym, annualNetPct)
 			if annualNetPct < threshold {
@@ -309,8 +325,10 @@ func (e *Engine) Evaluate(tenantID string) []arb.TradeIntent {
 				}
 
 				annualGrossPct := (rateB - rateA) * 3 * 365 * 100
-				feePct := (dA.feeBpsTaker+dB.feeBpsTaker) * 2 / 10000 * 100
-				annualNetPct := annualGrossPct - feePct
+				// Round-trip: 4 legs across 2 venues + slippage on all 4.
+				feePct := (dA.feeBpsTaker + dB.feeBpsTaker) * 4 / 10000 * 100
+				slipPct := e.policy.maxSlippage(sym) * 4 / 10000 * 100
+				annualNetPct := annualGrossPct - feePct - slipPct
 				threshold := e.minYield(sym, annualNetPct)
 				if annualNetPct < threshold {
 					e.Rejected["diff_below_threshold"]++
@@ -406,6 +424,11 @@ func (e *Engine) applyVolGate(venue, symbol string, notional float64) float64 {
 	log.Printf("funding: vol gate sym=%s venue=%s vol=%.1f%% > %.1f%% — reducing notional %.0f → %.0f",
 		symbol, venue, vol, e.policy.VolatilityGate.VolThresholdPct, notional, reduced)
 	return reduced
+}
+
+// signFlipped returns true if a and b have opposite signs (one positive, one negative).
+func signFlipped(a, b float64) bool {
+	return (a > 0 && b < 0) || (a < 0 && b > 0)
 }
 
 func (e *Engine) onCooldown(key string, nowMs int64) bool {
