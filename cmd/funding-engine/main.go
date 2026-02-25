@@ -94,6 +94,23 @@ func main() {
 
 	log.Println("funding-engine: started")
 
+	// evaluateExitsNow runs exit evaluation and publishes any unwind intents.
+	evaluateExitsNow := func() {
+		positions := posTracker.OpenPositions()
+		if len(positions) == 0 {
+			return
+		}
+		exitIntents := engine.EvaluateExits(tenantID, positions)
+		for _, intent := range exitIntents {
+			if err := bus.PublishIntent(ctx, intent); err != nil {
+				log.Printf("funding-engine: exit publish error: %v", err)
+			} else {
+				log.Printf("funding-engine: EXIT intent strategy=%s sym=%s id=%s",
+					intent.Strategy, intent.Symbol, intent.IntentID)
+			}
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -121,6 +138,15 @@ func main() {
 				}
 			}
 
+		case <-engine.ExitSignalC:
+			// Funding rate sign change detected — evaluate exits immediately
+			// instead of waiting for the next eval tick.
+			if bus.KillSwitchActive(ctx) {
+				continue
+			}
+			log.Println("funding-engine: rate inversion detected — evaluating exits")
+			evaluateExitsNow()
+
 		case <-evalTicker.C:
 			if bus.KillSwitchActive(ctx) {
 				log.Println("funding-engine: kill switch active — skipping eval")
@@ -144,19 +170,8 @@ func main() {
 				}
 			}
 
-			// Evaluate exit signals on open positions.
-			positions := posTracker.OpenPositions()
-			if len(positions) > 0 {
-				exitIntents := engine.EvaluateExits(tenantID, positions)
-				for _, intent := range exitIntents {
-					if err := bus.PublishIntent(ctx, intent); err != nil {
-						log.Printf("funding-engine: exit publish error: %v", err)
-					} else {
-						log.Printf("funding-engine: EXIT intent strategy=%s sym=%s id=%s",
-							intent.Strategy, intent.Symbol, intent.IntentID)
-					}
-				}
-			}
+			// Evaluate exit signals on open positions (periodic fallback).
+			evaluateExitsNow()
 
 		default:
 			// Drain market:quotes to keep funding rate state fresh.

@@ -287,3 +287,104 @@ func TestMarshalFill(t *testing.T) {
 		t.Error("marshalled data should not be empty")
 	}
 }
+
+// Test that venue profiles apply maker vs taker fees correctly.
+func TestMakerTakerFeeWithVenueProfiles(t *testing.T) {
+	cfg := &Config{
+		TradingMode:    "PAPER",
+		SimSlippageBps: 4.0,
+		SimLatencyMs:   50,
+		AdverseSelBps:  10.0,
+		TenantID:       "test",
+		VenueProfiles: map[string]VenueProfile{
+			"binance": {LatencyMinMs: 10, LatencyMaxMs: 10, SlippageBps: 2.0, DepthSlopeBps: 0.0, FeeBpsTaker: 4.5, FeeBpsMaker: 2.0, PartialFillPct: 0},
+			"deribit": {LatencyMinMs: 10, LatencyMaxMs: 10, SlippageBps: 2.0, DepthSlopeBps: 0.0, FeeBpsTaker: 3.0, FeeBpsMaker: 0.0, PartialFillPct: 0},
+		},
+	}
+	cache := NewPriceCache()
+	cache.Update(consensus.ConsensusUpdate{
+		Symbol:    "BTC-PERP",
+		Consensus: consensus.Consensus{Mid: 100000},
+	})
+
+	// Run many fills and verify all fees fall within [maker, taker] range.
+	makerCount := 0
+	takerCount := 0
+	for i := 0; i < 200; i++ {
+		exec := NewPaperExecutor(cfg, cache)
+		intent := makeTestIntent("BTC-PERP", time.Now().UnixMilli()+60000)
+		events, _ := exec.Execute(context.Background(), intent)
+		for _, ev := range events {
+			profile := cfg.VenueProfiles[ev.Venue]
+			expectedMaker := ev.FilledNotionalUSD * profile.FeeBpsMaker / 10000
+			expectedTaker := ev.FilledNotionalUSD * profile.FeeBpsTaker / 10000
+			if ev.FeesUSDActual < expectedMaker-0.01 || ev.FeesUSDActual > expectedTaker+0.01 {
+				t.Errorf("event venue=%s fees=$%.4f outside [maker=$%.4f, taker=$%.4f]",
+					ev.Venue, ev.FeesUSDActual, expectedMaker, expectedTaker)
+			}
+			if ev.FeeType == "maker" {
+				makerCount++
+			} else {
+				takerCount++
+			}
+		}
+	}
+	// With 30% maker probability and 400 events, expect some of each.
+	if makerCount == 0 {
+		t.Error("expected at least some maker fills over 200 iterations")
+	}
+	if takerCount == 0 {
+		t.Error("expected at least some taker fills over 200 iterations")
+	}
+	t.Logf("maker fills: %d, taker fills: %d (of %d total)", makerCount, takerCount, makerCount+takerCount)
+}
+
+// Test that FeeType field is set on execution events.
+func TestFeeTypeFieldSet(t *testing.T) {
+	cfg := &Config{
+		TradingMode:    "PAPER",
+		SimSlippageBps: 4.0,
+		SimLatencyMs:   50,
+		AdverseSelBps:  10.0,
+		TenantID:       "test",
+		VenueProfiles: map[string]VenueProfile{
+			"binance": {LatencyMinMs: 10, LatencyMaxMs: 10, SlippageBps: 2.0, DepthSlopeBps: 0.0, FeeBpsTaker: 4.5, FeeBpsMaker: 2.0, PartialFillPct: 0},
+			"deribit": {LatencyMinMs: 10, LatencyMaxMs: 10, SlippageBps: 2.0, DepthSlopeBps: 0.0, FeeBpsTaker: 3.0, FeeBpsMaker: 0.0, PartialFillPct: 0},
+		},
+	}
+	cache := NewPriceCache()
+	cache.Update(consensus.ConsensusUpdate{
+		Symbol:    "BTC-PERP",
+		Consensus: consensus.Consensus{Mid: 100000},
+	})
+	exec := NewPaperExecutor(cfg, cache)
+	intent := makeTestIntent("BTC-PERP", time.Now().UnixMilli()+60000)
+	events, _ := exec.Execute(context.Background(), intent)
+	for i, ev := range events {
+		if ev.FeeType != "maker" && ev.FeeType != "taker" {
+			t.Errorf("event[%d] FeeType should be 'maker' or 'taker', got %q", i, ev.FeeType)
+		}
+	}
+}
+
+// Test that without venue profiles, fees default to 4bps taker.
+func TestFallbackFeeWithoutVenueProfiles(t *testing.T) {
+	cfg := testConfig() // no VenueProfiles
+	cache := NewPriceCache()
+	cache.Update(consensus.ConsensusUpdate{
+		Symbol:    "BTC-PERP",
+		Consensus: consensus.Consensus{Mid: 100000},
+	})
+	exec := NewPaperExecutor(cfg, cache)
+	intent := makeTestIntent("BTC-PERP", time.Now().UnixMilli()+60000)
+	events, _ := exec.Execute(context.Background(), intent)
+	for i, ev := range events {
+		expected := ev.FilledNotionalUSD * 4.0 / 10000
+		if math.Abs(ev.FeesUSDActual-expected) > 0.01 {
+			t.Errorf("event[%d] fee should be ~$%.2f (4bps fallback), got $%.2f", i, expected, ev.FeesUSDActual)
+		}
+		if ev.FeeType != "taker" {
+			t.Errorf("event[%d] FeeType should be 'taker' for fallback, got %q", i, ev.FeeType)
+		}
+	}
+}

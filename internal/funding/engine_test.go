@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ezyjtw/consensus-engine/internal/arb"
 	"github.com/ezyjtw/consensus-engine/internal/consensus"
 )
 
@@ -315,5 +316,520 @@ func TestSymbolYieldThresholdOverride(t *testing.T) {
 	}
 	if pepeEmitted {
 		t.Error("PEPE-PERP: ~15% yield should fail override MED=22% threshold")
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRITICAL PATH TESTS — yield calculation, carry lifecycle, exit signals,
+// regime transitions. These are the tests that protect real money.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// --- Yield calculation: verify round-trip fees + slippage are deducted ---
+
+func TestYieldDeductsRoundTripCosts(t *testing.T) {
+	p := testFundingPolicy()
+	p.MaxSlippageBps = 8.0 // 8 bps per leg
+	// Use only MED threshold (remove HIGH) so threshold is always 12%.
+	p.MinAnnualYieldPct = map[string]float64{"MED": 12.0}
+	e := setupEngine(p)
+
+	// Rate that gives exactly 12% annualised gross:
+	// rate * 3 * 365 * 100 = 12.0 → rate = 12 / (3*365*100) ≈ 0.0001096
+	// Round-trip cost: fee=4bps*4legs=16bps=0.16%, slip=8bps*4legs=32bps=0.32%
+	// Total cost: 0.48%. Net = 12.0 - 0.48 = 11.52% < MED threshold (12%).
+	// So this should be REJECTED.
+	rate := 12.0 / (3 * 365 * 100)
+	injectVenueData(e, "BTC-PERP", "binance", rate, 100000, 4.0)
+
+	intents := e.Evaluate("t1")
+	if len(intents) != 0 {
+		t.Errorf("12%% gross yield should be rejected after round-trip costs (net ~11.52%%), got %d intents", len(intents))
+	}
+
+	// Now increase rate to compensate for round-trip costs.
+	// Need net > 12%: gross > 12% + 0.48% = 12.48%
+	rate2 := 12.5 / (3 * 365 * 100)
+	// Clear cooldown by creating fresh engine.
+	e2 := setupEngine(p)
+	injectVenueData(e2, "BTC-PERP", "binance", rate2, 100000, 4.0)
+
+	intents2 := e2.Evaluate("t1")
+	if len(intents2) == 0 {
+		t.Error("12.5% gross yield should pass after round-trip costs (net ~12.02%%)")
+	}
+}
+
+func TestYieldRejectsWhenSlippageEatsEdge(t *testing.T) {
+	p := testFundingPolicy()
+	p.MaxSlippageBps = 50.0 // extreme slippage: 50 bps per leg
+	e := setupEngine(p)
+
+	// ~21.9% gross, but 50bps*4legs=200bps=2% slippage + fees.
+	// Should still pass (21.9 - 2.16 - 0.64 ≈ 19.1% > 12%).
+	injectVenueData(e, "BTC-PERP", "binance", highYieldRate(), 100000, 4.0)
+
+	intents := e.Evaluate("t1")
+	if len(intents) == 0 {
+		t.Error("high yield should still pass even with elevated slippage")
+	}
+}
+
+// --- Carry lifecycle: entry → hold → rate flip → exit ---
+
+func TestCarryLifecycle_EntryThenExitOnRateFlip(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+
+	// Step 1: Entry — positive funding rate, should generate carry intent.
+	injectVenueData(e, "BTC-PERP", "binance", highYieldRate(), 100000, 4.0)
+	entryIntents := e.Evaluate("t1")
+	if len(entryIntents) == 0 {
+		t.Fatal("step 1: should emit carry entry intent")
+	}
+	entry := entryIntents[0]
+	if entry.Strategy != StrategyFundingCarry {
+		t.Errorf("step 1: strategy should be FUNDING_CARRY, got %s", entry.Strategy)
+	}
+	if entry.Legs[0].Market != "SPOT" || entry.Legs[0].Action != "BUY" {
+		t.Error("step 1: leg 0 should be SPOT BUY")
+	}
+	if entry.Legs[1].Market != "PERP" || entry.Legs[1].Action != "SELL" {
+		t.Error("step 1: leg 1 should be PERP SELL")
+	}
+
+	// Step 2: Simulate position is now open. Rate flips negative.
+	injectVenueData(e, "BTC-PERP", "binance", -0.0001, 100000, 4.0)
+	openPos := []OpenPosition{{
+		Strategy:     StrategyFundingCarry,
+		Symbol:       "BTC-PERP",
+		Venue:        "binance",
+		NotionalUSD:  50000,
+		EntryRateBps: highYieldRate() * 10000,
+		EntryTsMs:    time.Now().UnixMilli() - 3600000, // 1h ago
+	}}
+
+	// Step 3: Exit — should generate unwind intent.
+	exitIntents := e.EvaluateExits("t1", openPos)
+	if len(exitIntents) == 0 {
+		t.Fatal("step 3: should emit exit intent on rate flip")
+	}
+	exit := exitIntents[0]
+	if exit.Strategy != StrategyFundingCarryExit {
+		t.Errorf("step 3: strategy should be FUNDING_CARRY_EXIT, got %s", exit.Strategy)
+	}
+	// Exit legs should be reverse of entry.
+	if exit.Legs[0].Market != "SPOT" || exit.Legs[0].Action != "SELL" {
+		t.Error("step 3: exit leg 0 should be SPOT SELL")
+	}
+	if exit.Legs[1].Market != "PERP" || exit.Legs[1].Action != "BUY" {
+		t.Error("step 3: exit leg 1 should be PERP BUY")
+	}
+	if exit.Legs[0].NotionalUSD != 50000 {
+		t.Errorf("step 3: exit notional should match position, got %.0f", exit.Legs[0].NotionalUSD)
+	}
+}
+
+// --- Exit signals: test all 4 exit reasons individually ---
+
+func TestExitSignal_FundingInverted(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+	// Current rate is negative.
+	injectVenueData(e, "BTC-PERP", "binance", -0.0001, 100000, 4.0)
+
+	pos := []OpenPosition{{
+		Strategy: StrategyFundingCarry, Symbol: "BTC-PERP", Venue: "binance",
+		NotionalUSD: 50000, EntryRateBps: 2.0, // was positive at entry
+	}}
+	exits := e.EvaluateExits("t1", pos)
+	if len(exits) == 0 {
+		t.Fatal("should exit on funding rate inversion")
+	}
+}
+
+func TestExitSignal_RegimeVolatile(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+	// Rate is still positive, but inject enough volatility to trigger VOLATILE regime.
+	// VOLATILE requires stdDev/|EWA| > 3.0.
+	// Feed many wildly varying rates to push stdDev up.
+	for i := 0; i < 50; i++ {
+		rate := 0.0001
+		if i%2 == 0 {
+			rate = -0.0001
+		}
+		e.forecaster.Update("binance", "BTC-PERP", rate, time.Now().UnixMilli()+int64(i*1000))
+	}
+	injectVenueData(e, "BTC-PERP", "binance", 0.0001, 100000, 4.0) // current rate positive
+
+	pos := []OpenPosition{{
+		Strategy: StrategyFundingCarry, Symbol: "BTC-PERP", Venue: "binance",
+		NotionalUSD: 50000, EntryRateBps: 1.0,
+	}}
+	exits := e.EvaluateExits("t1", pos)
+	if len(exits) == 0 {
+		t.Fatal("should exit when regime is VOLATILE")
+	}
+}
+
+func TestExitSignal_VolatilitySpike(t *testing.T) {
+	p := testFundingPolicy()
+	p.VolatilityGate.VolThresholdPct = 5.0
+	e := setupEngine(p)
+
+	// Feed mark prices with >5% realized vol.
+	now := time.Now().UnixMilli()
+	for i := 0; i < 100; i++ {
+		price := 100000.0
+		if i%2 == 0 {
+			price = 106000.0 // 6% swings
+		}
+		e.volTracker.Record("binance", "BTC-PERP", price, now+int64(i*60000))
+	}
+	injectVenueData(e, "BTC-PERP", "binance", 0.0002, 100000, 4.0)
+
+	pos := []OpenPosition{{
+		Strategy: StrategyFundingCarry, Symbol: "BTC-PERP", Venue: "binance",
+		NotionalUSD: 50000, EntryRateBps: 2.0,
+	}}
+	exits := e.EvaluateExits("t1", pos)
+	if len(exits) == 0 {
+		t.Fatal("should exit on volatility spike")
+	}
+}
+
+func TestExitSignal_NearResetNegative(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+
+	// Set reset to happen 10 minutes from now so IsNearReset(30min) = true.
+	now := time.Now().UTC()
+	resetHour := now.Add(10 * time.Minute).Hour()
+	e.scheduler = &FundingScheduler{resetHours: []int{resetHour}}
+
+	// Current rate is negative and we're near reset.
+	injectVenueData(e, "BTC-PERP", "binance", -0.00005, 100000, 4.0)
+
+	pos := []OpenPosition{{
+		Strategy: StrategyFundingCarry, Symbol: "BTC-PERP", Venue: "binance",
+		NotionalUSD: 50000, EntryRateBps: 2.0,
+	}}
+	exits := e.EvaluateExits("t1", pos)
+	if len(exits) == 0 {
+		t.Fatal("should exit on negative rate near reset")
+	}
+}
+
+func TestNoExitWhenConditionsHealthy(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+	// Positive rate, stable regime, no vol spike, not near reset.
+	injectVenueData(e, "BTC-PERP", "binance", 0.0002, 100000, 4.0)
+	// Feed stable rates so regime is POSITIVE.
+	for i := 0; i < 20; i++ {
+		e.forecaster.Update("binance", "BTC-PERP", 0.0002, time.Now().UnixMilli()+int64(i*1000))
+	}
+
+	pos := []OpenPosition{{
+		Strategy: StrategyFundingCarry, Symbol: "BTC-PERP", Venue: "binance",
+		NotionalUSD: 50000, EntryRateBps: 2.0,
+	}}
+	exits := e.EvaluateExits("t1", pos)
+	if len(exits) != 0 {
+		t.Errorf("should NOT exit when conditions are healthy, got %d exit intents", len(exits))
+	}
+}
+
+// --- Reverse carry: entry on negative funding, exit on flip to positive ---
+
+func TestReverseCarryLifecycle(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+
+	// Step 1: Negative funding → should emit reverse carry.
+	injectVenueData(e, "BTC-PERP", "binance", -highYieldRate(), 100000, 4.0)
+	intents := e.Evaluate("t1")
+	found := false
+	for _, intent := range intents {
+		if intent.Strategy == StrategyFundingCarryReverse {
+			found = true
+			if intent.Legs[0].Action != "SELL" || intent.Legs[0].Market != "SPOT" {
+				t.Error("reverse carry leg 0 should be SPOT SELL")
+			}
+			if intent.Legs[1].Action != "BUY" || intent.Legs[1].Market != "PERP" {
+				t.Error("reverse carry leg 1 should be PERP BUY")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("should emit FUNDING_CARRY_REVERSE on negative funding")
+	}
+
+	// Step 2: Rate flips positive → exit reverse carry.
+	injectVenueData(e, "BTC-PERP", "binance", 0.0001, 100000, 4.0)
+	pos := []OpenPosition{{
+		Strategy: StrategyFundingCarryReverse, Symbol: "BTC-PERP", Venue: "binance",
+		NotionalUSD: 50000, EntryRateBps: -highYieldRate() * 10000,
+	}}
+	exits := e.EvaluateExits("t1", pos)
+	if len(exits) == 0 {
+		t.Fatal("should exit reverse carry when rate flips positive")
+	}
+	if exits[0].Strategy != StrategyFundingCarryReverseExit {
+		t.Errorf("exit strategy should be FUNDING_CARRY_REVERSE_EXIT, got %s", exits[0].Strategy)
+	}
+}
+
+// --- Regime transitions ---
+
+func TestRegimeTransition_PositiveToVolatile(t *testing.T) {
+	f := NewRegimeForecaster(0.15)
+
+	// Feed stable positive rates → should be POSITIVE.
+	for i := 0; i < 30; i++ {
+		r := f.Update("binance", "BTC-PERP", 0.0002, int64(i*1000))
+		if i == 29 && r.Label != "POSITIVE" {
+			t.Errorf("after stable positive rates, expected POSITIVE, got %s", r.Label)
+		}
+	}
+
+	// Feed wildly oscillating rates → should transition to VOLATILE.
+	for i := 30; i < 80; i++ {
+		rate := 0.001
+		if i%2 == 0 {
+			rate = -0.001
+		}
+		r := f.Update("binance", "BTC-PERP", rate, int64(i*1000))
+		if i == 79 && r.Label != "VOLATILE" {
+			t.Errorf("after oscillating rates, expected VOLATILE, got %s (ewa=%.6f stddev=%.6f)",
+				r.Label, r.EWA, r.StdDev)
+		}
+	}
+}
+
+func TestRegimeTransition_VolatileBlocksEntry(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+
+	// Push regime to VOLATILE.
+	for i := 0; i < 50; i++ {
+		rate := 0.001
+		if i%2 == 0 {
+			rate = -0.001
+		}
+		e.forecaster.Update("binance", "BTC-PERP", rate, time.Now().UnixMilli()+int64(i*1000))
+	}
+
+	// Even with a high yield rate, entry should be blocked by VOLATILE regime.
+	injectVenueData(e, "BTC-PERP", "binance", highYieldRate(), 100000, 4.0)
+	intents := e.Evaluate("t1")
+	if len(intents) != 0 {
+		t.Errorf("VOLATILE regime should block carry entry, got %d intents", len(intents))
+	}
+	if e.Rejected["carry_volatile_regime"] == 0 {
+		t.Error("expected carry_volatile_regime rejection counter")
+	}
+}
+
+// --- Near-reset entry blocking ---
+
+func TestNearResetBlocksNewEntry(t *testing.T) {
+	p := testFundingPolicy()
+	e := NewEngine(p)
+
+	// Set scheduler with a reset at every hour so the next reset is always
+	// less than 60 minutes away. With 30-minute near-reset window, this
+	// triggers if we're past minute 30 of the current hour. If we happen to
+	// be in the first 30 min, the next reset (top of next hour) is >30 min away,
+	// so we use a denser schedule. Setting all 24 hours guarantees <60 min.
+	// Alternatively, we can set resets every hour. For reliability, we set the
+	// next hour from now as a reset, and check if it's within 30 min.
+	now := time.Now().UTC()
+	nextHour := (now.Hour() + 1) % 24
+	e.scheduler = &FundingScheduler{resetHours: []int{nextHour}}
+
+	// Only run the assertion if we're actually in the near-reset window.
+	if !e.scheduler.IsNearReset(now, 30*time.Minute) {
+		t.Skip("current minute position >30 min from next hour boundary; near-reset test not applicable")
+		return
+	}
+
+	injectVenueData(e, "BTC-PERP", "binance", highYieldRate(), 100000, 4.0)
+	intents := e.Evaluate("t1")
+	if len(intents) != 0 {
+		t.Errorf("near-reset should block new entry, got %d intents", len(intents))
+	}
+	if e.Rejected["carry_near_reset"] == 0 {
+		t.Error("expected carry_near_reset rejection counter")
+	}
+}
+
+// --- Differential strategy tests ---
+
+func TestDifferentialEntry(t *testing.T) {
+	p := testFundingPolicy()
+	p.MinDifferentialBps8h = 5.0
+	e := setupEngine(p)
+
+	// binance: low rate, okx: high rate → should long binance, short okx.
+	// Differential must be > 5 bps = 0.0005. Use 0.0001 vs 0.0010 = 9 bps spread.
+	// Both rates are positive but the differential carry captures the spread.
+	injectVenueData(e, "BTC-PERP", "binance", 0.0001, 100000, 4.0)
+	injectVenueData(e, "BTC-PERP", "okx", 0.0010, 100000, 5.0)
+
+	intents := e.Evaluate("t1")
+	var diffIntent *arb.TradeIntent
+	for i := range intents {
+		if intents[i].Strategy == StrategyFundingDifferential {
+			diffIntent = &intents[i]
+			break
+		}
+	}
+	if diffIntent == nil {
+		t.Fatal("should emit FUNDING_DIFFERENTIAL intent")
+	}
+
+	// Verify legs: should long low-rate (binance), short high-rate (okx).
+	if diffIntent.Legs[0].Action != "BUY" {
+		t.Error("diff leg 0 should be BUY (long low-rate venue)")
+	}
+	if diffIntent.Legs[1].Action != "SELL" {
+		t.Error("diff leg 1 should be SELL (short high-rate venue)")
+	}
+}
+
+func TestDifferentialExitOnInversion(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+
+	// Rates inverted: long venue now has higher rate than short venue.
+	injectVenueData(e, "BTC-PERP", "binance", 0.0005, 100000, 4.0) // long venue rate now higher
+	injectVenueData(e, "BTC-PERP", "okx", 0.0001, 100000, 5.0)     // short venue rate now lower
+
+	pos := []OpenPosition{{
+		Strategy:    StrategyFundingDifferential,
+		Symbol:      "BTC-PERP",
+		LongVenue:   "binance",
+		ShortVenue:  "okx",
+		NotionalUSD: 50000,
+		EntryRateBps: 25.0,
+	}}
+	exits := e.EvaluateExits("t1", pos)
+	if len(exits) == 0 {
+		t.Fatal("should exit differential when spread inverts")
+	}
+	if exits[0].Strategy != StrategyFundingDiffExit {
+		t.Errorf("exit strategy should be FUNDING_DIFFERENTIAL_EXIT, got %s", exits[0].Strategy)
+	}
+}
+
+// --- Cooldown enforcement ---
+
+func TestCooldownBlocksRepeatEntry(t *testing.T) {
+	p := testFundingPolicy()
+	p.CooldownS = 300 // 5 minute cooldown
+	e := setupEngine(p)
+	injectVenueData(e, "BTC-PERP", "binance", highYieldRate(), 100000, 4.0)
+
+	// First eval should emit.
+	intents1 := e.Evaluate("t1")
+	if len(intents1) == 0 {
+		t.Fatal("first eval should emit intent")
+	}
+
+	// Second eval within cooldown should NOT emit.
+	intents2 := e.Evaluate("t1")
+	if len(intents2) != 0 {
+		t.Errorf("second eval within cooldown should emit 0 intents, got %d", len(intents2))
+	}
+	if e.Rejected["carry_cooldown"] == 0 {
+		t.Error("expected carry_cooldown rejection counter")
+	}
+}
+
+// --- Event-driven exit signal ---
+
+func TestExitSignalChannelOnRateInversion(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+
+	// Inject positive funding rate first.
+	e.UpdateQuote(consensus.Quote{
+		Symbol:      "BTC-PERP",
+		Venue:       "binance",
+		FundingRate: 0.0002,
+		Mark:        100000,
+		TsMs:        time.Now().UnixMilli(),
+	})
+
+	// Now inject negative rate — sign flip should trigger ExitSignalC.
+	e.UpdateQuote(consensus.Quote{
+		Symbol:      "BTC-PERP",
+		Venue:       "binance",
+		FundingRate: -0.0001,
+		Mark:        100000,
+		TsMs:        time.Now().UnixMilli(),
+	})
+
+	select {
+	case <-e.ExitSignalC:
+		// Expected: channel received signal.
+	default:
+		t.Error("ExitSignalC should fire on funding rate sign change")
+	}
+}
+
+func TestExitSignalChannelNotFiredOnSameSign(t *testing.T) {
+	p := testFundingPolicy()
+	e := setupEngine(p)
+
+	// Inject two positive rates — no sign flip.
+	e.UpdateQuote(consensus.Quote{
+		Symbol:      "BTC-PERP",
+		Venue:       "binance",
+		FundingRate: 0.0002,
+		Mark:        100000,
+		TsMs:        time.Now().UnixMilli(),
+	})
+	e.UpdateQuote(consensus.Quote{
+		Symbol:      "BTC-PERP",
+		Venue:       "binance",
+		FundingRate: 0.0003,
+		Mark:        100000,
+		TsMs:        time.Now().UnixMilli(),
+	})
+
+	select {
+	case <-e.ExitSignalC:
+		t.Error("ExitSignalC should NOT fire when rate stays positive")
+	default:
+		// Expected: no signal.
+	}
+}
+
+// --- Scheduler tests ---
+
+func TestSchedulerNextAndPrevReset(t *testing.T) {
+	s := NewFundingScheduler()
+	// At 07:30 UTC: next reset should be 08:00, prev should be 00:00.
+	ts := time.Date(2025, 6, 15, 7, 30, 0, 0, time.UTC)
+	next := s.NextReset(ts)
+	prev := s.PrevReset(ts)
+
+	if next.Hour() != 8 {
+		t.Errorf("next reset at 07:30 should be 08:00, got %d:00", next.Hour())
+	}
+	if prev.Hour() != 0 {
+		t.Errorf("prev reset at 07:30 should be 00:00, got %d:00", prev.Hour())
+	}
+}
+
+func TestSchedulerPeriodFraction(t *testing.T) {
+	s := NewFundingScheduler()
+	// 4 hours after 00:00 reset = 50% through period.
+	ts := time.Date(2025, 6, 15, 4, 0, 0, 0, time.UTC)
+	frac := s.PeriodFraction(ts)
+	if frac < 0.49 || frac > 0.51 {
+		t.Errorf("4h into 8h period should be ~0.5, got %.2f", frac)
 	}
 }

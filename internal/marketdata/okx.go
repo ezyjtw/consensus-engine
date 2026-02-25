@@ -249,6 +249,8 @@ func (a *OKXAdapter) connect(ctx context.Context) error {
 			rate, _ := strconv.ParseFloat(fr.FundingRate, 64)
 			qs.update(func(q *consensus.Quote) {
 				q.FundingRate = rate
+				q.TsMs = now // OKX funding-rate push has no ts; use receive time.
+				q.FeedHealth.LastMsgTsMs = now
 			})
 			// Funding rate updates are infrequent; no publish triggered.
 

@@ -130,6 +130,7 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 		profile, hasProfile := e.cfg.VenueProfiles[leg.Venue]
 		var latencyMs int64
 		var slipBps, feeBps float64
+		feeType := "taker"
 		if hasProfile {
 			// Stochastic latency within venue's observed range.
 			span := profile.LatencyMaxMs - profile.LatencyMinMs
@@ -140,7 +141,15 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 			}
 			// Depth-based slippage: base + slope per $10k notional.
 			slipBps = profile.SlippageBps + profile.DepthSlopeBps*(leg.NotionalUSD/10000)
+			// Maker vs taker fee selection.
+			// The live executor tries LIMIT first (maker), then falls back to
+			// IOC (taker). Model this: ~30% of fills rest as maker when the
+			// order type allows limit orders and slippage budget is generous.
 			feeBps = profile.FeeBpsTaker
+			if leg.Type != "IOC" && leg.MaxSlippageBps >= slipBps*2 && rand.Float64() < 0.3 {
+				feeBps = profile.FeeBpsMaker
+				feeType = "maker"
+			}
 		} else {
 			latencyMs = e.cfg.SimLatencyMs
 			slipBps = e.cfg.SimSlippageBps
@@ -206,6 +215,7 @@ func (e *PaperExecutor) Execute(ctx context.Context, intent arb.TradeIntent) ([]
 			SlippageBpsActual:     slippageActual,
 			SlippageBpsAllowed:    leg.MaxSlippageBps,
 			FeesUSDActual:         feesUSD,
+			FeeType:               feeType,
 			TsMs:                  fillTs,
 			LatencySignalToFillMs: latencyMs,
 			TenantID:              e.cfg.TenantID,
