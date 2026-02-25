@@ -43,7 +43,7 @@ func (e *Engine) EvaluateExits(tenantID string, positions []OpenPosition) []arb.
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	now := time.Now()
+	now := e.now()
 	nowMs := now.UnixMilli()
 	var intents []arb.TradeIntent
 
