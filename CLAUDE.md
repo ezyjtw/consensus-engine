@@ -248,3 +248,18 @@ Edit `configs/policies/consensus_policy.yaml`. Key parameters:
 - `stale_ms` — quote staleness cutoff
 - `min_core_quorum` — minimum venues for quality rating
 - `base_trust` — per-venue trust weights
+
+## HyroTrader Challenge Build Spec
+
+The file `HYROTRADER_CHALLENGE_BUILD_SPEC.md` in the repo root is the **source of truth** for the HyroTrader Two-Step $100k challenge integration. It covers:
+
+- Challenge rules (Phase 1, Phase 2, Funded account)
+- New `challenge-daemon` service architecture and config
+- Modifications to `risk-daemon`, `funding-engine`, `arb-engine`, `execution-router`, `capital-allocator`, `market-data`, and `ledger`
+- Config structures (`configs/challenge_config.yaml`)
+- Testing requirements (unit, integration, paper trading, stress)
+- Phased build sequence (A→D) with exact priority ordering
+
+**Key safety note:** The daily drawdown calculation from the *highest equity point* (not opening equity) is the single most dangerous rule. Unit tests for this MUST cover scenarios where delta-neutral positions show temporary unrealised swings on individual legs.
+
+When implementing challenge features, follow the build sequence in the spec: start with Phase A items 1-5 (challenge-daemon built and tested) before touching any strategy code.
